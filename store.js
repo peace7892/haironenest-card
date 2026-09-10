@@ -10,22 +10,60 @@ const Store = (() => {
 
   // ---- 고객 --------------------------------------------------------------
 
-  function addCustomer(state, { name, last4 }) {
+  const digitsOnly = (v) => (v ?? '').replace(/\D/g, '');
+
+  function cleanPhone(phone) {
+    const d = digitsOnly(phone);
+    if (d && !/^\d{10,11}$/.test(d)) throw new Error('전화번호는 숫자 10~11자리로 적으세요 (예: 010-1234-5678)');
+    return d;
+  }
+
+  function assertPhoneFree(state, phone, exceptId) {
+    if (phone && state.customers.some(c => c.phone === phone && c.id !== exceptId)) {
+      const dup = state.customers.find(c => c.phone === phone && c.id !== exceptId);
+      throw new Error(`이미 같은 번호의 고객이 있습니다: ${dup.name}`);
+    }
+  }
+
+  function addCustomer(state, { name, phone }) {
     const trimmed = (name ?? '').trim();
     if (!trimmed) throw new Error('이름을 입력하세요');
-    const digits = (last4 ?? '').trim();
-    if (digits && !/^\d{4}$/.test(digits)) throw new Error('전화번호 뒤 4자리는 숫자 4개로 적으세요');
-    const customer = { id: state.nextId, name: trimmed, last4: digits, profile: emptyProfile(), profileHistory: [] };
+    const clean = cleanPhone(phone);
+    assertPhoneFree(state, clean);
+    const customer = { id: state.nextId, name: trimmed, phone: clean, profile: emptyProfile(), profileHistory: [] };
     return {
       state: { ...state, nextId: state.nextId + 1, customers: [...state.customers, customer] },
       customer,
     };
   }
 
+  function editCustomer(state, customerId, { name, phone }) {
+    const c = requireCustomer(state, customerId);
+    const trimmed = (name ?? '').trim();
+    if (!trimmed) throw new Error('이름을 입력하세요');
+    const clean = cleanPhone(phone);
+    assertPhoneFree(state, clean, customerId);
+    const updated = { ...c, name: trimmed, phone: clean };
+    return {
+      state: { ...state, customers: state.customers.map(x => (x.id === customerId ? updated : x)) },
+      customer: updated,
+    };
+  }
+
+  // 목록·명단에서 보일 때: 앞 3자리와 뒤 4자리만. 옛 뒤 4자리 데이터는 ****-1234
+  function maskPhone(phone) {
+    if (!phone) return '';
+    if (phone.length <= 4) return `****-${phone}`;
+    const head = phone.slice(0, 3);
+    const tail = phone.slice(-4);
+    return `${head}-${'*'.repeat(phone.length - 7)}-${tail}`;
+  }
+
   function findCustomers(state, query) {
     const q = (query ?? '').trim();
     if (!q) return state.customers;
-    return state.customers.filter(c => c.name.includes(q) || (c.last4 && c.last4.includes(q)));
+    const qd = digitsOnly(q);
+    return state.customers.filter(c => c.name.includes(q) || (qd && c.phone && c.phone.includes(qd)));
   }
 
   function requireCustomer(state, customerId) {
@@ -118,7 +156,9 @@ const Store = (() => {
 
   // 이전 버전(자유 메모 한 칸: memos[].text)을 방문 기록(visits[].done)으로 옮긴다.
   function migrate(p) {
-    const customers = p.customers.map(c => ({ ...c, profile: c.profile ?? emptyProfile(), profileHistory: c.profileHistory ?? [] }));
+    const customers = p.customers.map(({ last4, ...c }) => ({
+      ...c, phone: c.phone ?? last4 ?? '', profile: c.profile ?? emptyProfile(), profileHistory: c.profileHistory ?? [],
+    }));
     const fromMemos = (p.memos ?? []).map(m => ({
       id: m.id, customerId: m.customerId, done: m.text, next: '', createdAt: m.createdAt,
       history: (m.history ?? []).map(h => ({ done: h.text, next: '', replacedAt: h.replacedAt })),
@@ -128,7 +168,7 @@ const Store = (() => {
     return { nextId: p.nextId ?? 1, customers, visits, today };
   }
 
-  return { createState, addCustomer, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize };
+  return { createState, addCustomer, editCustomer, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

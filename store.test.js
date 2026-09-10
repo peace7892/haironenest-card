@@ -1,38 +1,32 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, addCustomer, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, addCustomer, editCustomer, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize } = require('./store.js');
 
-test('이름과 뒤 4자리로 고객을 만든다', () => {
+test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
-  const { state, customer } = addCustomer(s0, { name: '김OO', last4: '1234' });
+  const { state, customer } = addCustomer(s0, { name: '김OO', phone: '01012341234' });
   assert.equal(customer.name, '김OO');
-  assert.equal(customer.last4, '1234');
+  assert.equal(customer.phone, '01012341234');
   assert.equal(state.customers.length, 1);
   assert.equal(s0.customers.length, 0, '원래 상태는 바뀌지 않는다');
 });
 
 test('이름이 비어 있으면 고객을 만들지 않는다', () => {
-  assert.throws(() => addCustomer(createState(), { name: '  ', last4: '1234' }), /이름/);
-});
-
-test('뒤 4자리는 비워도 되지만, 적으면 숫자 4개여야 한다', () => {
-  const ok = addCustomer(createState(), { name: '이OO', last4: '' });
-  assert.equal(ok.customer.last4, '');
-  assert.throws(() => addCustomer(createState(), { name: '이OO', last4: '12a' }), /4자리/);
+  assert.throws(() => addCustomer(createState(), { name: '  ', phone: '01012341234' }), /이름/);
 });
 
 test('이름 일부로 고객을 찾고, 없는 이름이면 빈 목록', () => {
-  let { state } = addCustomer(createState(), { name: '김OO', last4: '1234' });
-  ({ state } = addCustomer(state, { name: '김OO', last4: '5678' }));
-  ({ state } = addCustomer(state, { name: '이OO', last4: '9999' }));
-  assert.deepEqual(findCustomers(state, '김').map(c => c.last4), ['1234', '5678']);
+  let { state } = addCustomer(createState(), { name: '김OO', phone: '01011111234' });
+  ({ state } = addCustomer(state, { name: '김OO', phone: '01022225678' }));
+  ({ state } = addCustomer(state, { name: '이OO', phone: '01033339999' }));
+  assert.deepEqual(findCustomers(state, '김').map(c => c.phone.slice(-4)), ['1234', '5678']);
   assert.deepEqual(findCustomers(state, '5678').map(c => c.name), ['김OO'], '뒤 4자리로도 찾는다');
   assert.deepEqual(findCustomers(state, '박'), []);
 });
 
 
 test('저장했다가 꺼내면 같은 상태가 돌아온다', () => {
-  const { state } = addCustomer(createState(), { name: '김OO', last4: '1234' });
+  const { state } = addCustomer(createState(), { name: '김OO', phone: '01012341234' });
   const restored = deserialize(serialize(state));
   assert.deepEqual(restored, state);
 });
@@ -44,9 +38,9 @@ test('저장된 것이 없거나 깨져 있으면 빈 상태로 시작한다', (
 });
 
 function twoCustomers() {
-  let { state, customer: kim } = addCustomer(createState(), { name: '김OO', last4: '1234' });
+  let { state, customer: kim } = addCustomer(createState(), { name: '김OO', phone: '01011111234' });
   let lee;
-  ({ state, customer: lee } = addCustomer(state, { name: '이OO', last4: '5678' }));
+  ({ state, customer: lee } = addCustomer(state, { name: '이OO', phone: '01022225678' }));
   return { state, kim, lee };
 }
 
@@ -130,4 +124,52 @@ test('이전 버전(자유 메모 한 칸) 저장 데이터를 열면 방문 기
   assert.deepEqual(v.history, [{ done: '더 옛', next: '', replacedAt: '2026-09-10T11:00:00' }]);
   assert.deepEqual(state.customers[0].profile, { talk: '', hair: '' });
   assert.deepEqual(deserialize(serialize(state)), state);
+});
+
+test('전화번호는 전체를 저장하고, 숫자만 남긴다', () => {
+  const { customer } = addCustomer(createState(), { name: '김OO', phone: '010-1234-5678' });
+  assert.equal(customer.phone, '01012345678');
+});
+
+test('전화번호를 적으면 10~11자리 숫자여야 하고, 비워도 된다', () => {
+  assert.throws(() => addCustomer(createState(), { name: '김OO', phone: '1234' }), /전화번호/);
+  assert.equal(addCustomer(createState(), { name: '김OO', phone: '' }).customer.phone, '');
+});
+
+test('같은 전화번호로 두 명을 만들 수 없다', () => {
+  const { state } = addCustomer(createState(), { name: '김OO', phone: '01012345678' });
+  assert.throws(() => addCustomer(state, { name: '박OO', phone: '010-1234-5678' }), /이미/);
+});
+
+test('이름과 전화번호를 고칠 수 있고, 다른 고객 번호와 겹치면 거부한다', () => {
+  let { state, customer: kim } = addCustomer(createState(), { name: '김OO', phone: '01012345678' });
+  ({ state } = addCustomer(state, { name: '이OO', phone: '01099998888' }));
+  ({ state } = editCustomer(state, kim.id, { name: '김OO(교사)', phone: '010-1111-2222' }));
+  const c = state.customers.find(x => x.id === kim.id);
+  assert.equal(c.name, '김OO(교사)');
+  assert.equal(c.phone, '01011112222');
+  assert.throws(() => editCustomer(state, kim.id, { name: '김OO', phone: '01099998888' }), /이미/);
+});
+
+test('번호 일부(뒤 4자리든 앞자리든)로 찾는다', () => {
+  let { state } = addCustomer(createState(), { name: '김OO', phone: '01012345678' });
+  ({ state } = addCustomer(state, { name: '이OO', phone: '01099995678' }));
+  assert.equal(findCustomers(state, '5678').length, 2);
+  assert.deepEqual(findCustomers(state, '9999').map(c => c.name), ['이OO']);
+  assert.deepEqual(findCustomers(state, '010-1234').map(c => c.name), ['김OO']);
+});
+
+test('가린 번호는 앞 3자리와 뒤 4자리만 보인다', () => {
+  assert.equal(maskPhone('01012345678'), '010-****-5678');
+  assert.equal(maskPhone('0212345678'), '021-***-5678');
+  assert.equal(maskPhone('1234'), '****-1234', '옛 뒤 4자리 데이터');
+  assert.equal(maskPhone(''), '');
+});
+
+test('옛 데이터의 뒤 4자리(last4)는 phone으로 옮겨져 그대로 보인다', () => {
+  const old = JSON.stringify({ nextId: 2, customers: [{ id: 1, name: '김OO', last4: '1234' }], memos: [] });
+  const state = deserialize(old);
+  assert.equal(state.customers[0].phone, '1234');
+  assert.equal(state.customers[0].last4, undefined);
+  assert.deepEqual(findCustomers(state, '1234').map(c => c.name), ['김OO']);
 });

@@ -5,6 +5,7 @@
   let view = { kind: 'today' }; // { kind: 'today' } | { kind: 'card', id }
   let editingVisitId = null;
   let editingProfile = false;
+  let editingIdentity = false;
 
   const $ = (sel) => document.querySelector(sel);
   const pad = (n) => String(n).padStart(2, '0');
@@ -19,7 +20,7 @@
     localStorage.setItem(KEY, Store.serialize(state));
   }
   function showMsg(el, text, kind) { if (el) { el.textContent = text; el.className = `msg ${kind}`; } }
-  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; commit(Store.markToday(state, id, today()).state); render(); }
+  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; commit(Store.markToday(state, id, today()).state); render(); }
 
   // ---- 왼쪽: 고객 목록 ----------------------------------------------------
   function renderCustomers() {
@@ -33,7 +34,7 @@
     const todayIds = state.today.date === today() ? state.today.customerIds : [];
     list.innerHTML = found.map((c) => `
       <li data-id="${c.id}" class="${c.id === activeId ? 'active' : ''}">
-        <span>${esc(c.name)} <small>${esc(c.last4)}</small></span>
+        <span>${esc(c.name)} <small>${esc(Store.maskPhone(c.phone))}</small></span>
         ${todayIds.includes(c.id) ? '<small>오늘</small>' : `<button type="button" class="small secondary" data-today="${c.id}">오늘</button>`}
       </li>`).join('');
   }
@@ -46,7 +47,7 @@
       ? '<div class="empty">아침에 핸드SOS 예약 명단을 보며, 왼쪽에서 고객을 찾아 [오늘]을 누르세요. 없는 고객은 새로 만듭니다.<br>명단에 없던 고객이 와서 카드를 열면 자동으로 여기에 들어옵니다.</div>'
       : list.map((t) => `
         <div class="today-item" data-open="${t.customer.id}">
-          <div class="name">${esc(t.customer.name)} <small style="color:var(--muted);font-weight:normal">${esc(t.customer.last4)}</small></div>
+          <div class="name">${esc(t.customer.name)} <small style="color:var(--muted);font-weight:normal">${esc(Store.maskPhone(t.customer.phone))}</small></div>
           <span class="status ${t.recorded ? 'done' : 'todo'}">${t.recorded ? '기록 남김' : '아직 안 적음'}</span>
           <div class="sub">${esc([t.customer.profile.hair, t.customer.profile.talk].filter(Boolean).join(' · ')) || '<i>고정 정보 없음</i>'}</div>
           <div class="sub">${t.lastNext ? '지난번 다음 방향: ' + esc(t.lastNext) : '지난 방문 기록 없음'}</div>
@@ -61,7 +62,7 @@
     const visits = Store.visitsOf(state, c.id);
     const latestNext = visits.find((v) => v.next)?.next;
     return `
-      <h2 class="card-title">${esc(c.name)} <small>${c.last4 ? '뒤 4자리 ' + esc(c.last4) + ' · ' : ''}지난 방문 ${visits.length}건</small></h2>
+      ${renderIdentity(c, visits.length)}
       ${renderProfile(c)}
       ${latestNext ? `<div class="next-big"><b>지난번에 다음에 하기로 한 것</b><p>${esc(latestNext)}</p></div>` : ''}
       <form id="visit-form">
@@ -73,6 +74,25 @@
       </form>
       <h3>지난 방문</h3>
       ${visits.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : visits.map(renderVisit).join('')}`;
+  }
+
+  const fmtPhone = (p) => (p.length === 11 ? `${p.slice(0, 3)}-${p.slice(3, 7)}-${p.slice(7)}` : p.length === 10 ? `${p.slice(0, 3)}-${p.slice(3, 6)}-${p.slice(6)}` : p);
+
+  function renderIdentity(c, visitCount) {
+    if (editingIdentity) {
+      return `
+        <div class="identity">
+          <div><label style="margin-top:0">이름</label><input type="text" id="id-name" value="${esc(c.name)}"></div>
+          <div><label style="margin-top:0">전화번호</label><input type="text" id="id-phone" inputmode="tel" value="${esc(fmtPhone(c.phone))}" placeholder="010-1234-5678"></div>
+          <button type="button" class="secondary" data-action="cancel-identity">취소</button>
+          <button type="button" data-action="save-identity">저장</button>
+        </div>
+        <div class="msg" id="identity-msg"></div>`;
+    }
+    const phoneText = !c.phone ? '번호 없음' : c.phone.length <= 4 ? `뒤 4자리만 있음 ${esc(c.phone)}` : esc(fmtPhone(c.phone));
+    return `
+      <h2 class="card-title">${esc(c.name)} <small>${phoneText} · 지난 방문 ${visitCount}건</small>
+        <button type="button" class="link" data-action="edit-identity">이름·번호 고치기</button></h2>`;
   }
 
   function renderProfile(c) {
@@ -150,9 +170,9 @@
   $('#new-customer-form').addEventListener('submit', (e) => {
     e.preventDefault();
     try {
-      const { state: next, customer } = Store.addCustomer(state, { name: $('#new-name').value, last4: $('#new-last4').value });
+      const { state: next, customer } = Store.addCustomer(state, { name: $('#new-name').value, phone: $('#new-phone').value });
       commit(next);
-      $('#new-name').value = ''; $('#new-last4').value = ''; $('#search').value = '';
+      $('#new-name').value = ''; $('#new-phone').value = ''; $('#search').value = '';
       showMsg($('#new-msg'), `${customer.name} 카드를 만들었습니다`, 'ok');
       openCard(customer.id);
       editingProfile = true; render();
@@ -166,7 +186,13 @@
     if (!btn || view.kind !== 'card') return;
     const a = btn.dataset.action;
     try {
-      if (a === 'edit-profile') { editingProfile = true; render(); $('#profile-talk').focus(); }
+      if (a === 'edit-identity') { editingIdentity = true; render(); $('#id-name').focus(); }
+      else if (a === 'cancel-identity') { editingIdentity = false; render(); }
+      else if (a === 'save-identity') {
+        commit(Store.editCustomer(state, view.id, { name: $('#id-name').value, phone: $('#id-phone').value }).state);
+        editingIdentity = false; render();
+      }
+      else if (a === 'edit-profile') { editingProfile = true; render(); $('#profile-talk').focus(); }
       else if (a === 'cancel-profile') { editingProfile = false; render(); }
       else if (a === 'save-profile') {
         commit(Store.setProfile(state, view.id, { talk: $('#profile-talk').value, hair: $('#profile-hair').value }, now()).state);
@@ -178,7 +204,7 @@
         commit(Store.editVisit(state, Number(btn.dataset.id), { done: $('#edit-done').value, next: $('#edit-next').value }, now()).state);
         editingVisitId = null; render();
       }
-    } catch (err) { showMsg($('#edit-msg') || $('#profile-msg'), err.message, 'error'); }
+    } catch (err) { showMsg($('#identity-msg') || $('#edit-msg') || $('#profile-msg'), err.message, 'error'); }
   });
 
   $('#card').addEventListener('submit', (e) => {

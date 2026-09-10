@@ -34,6 +34,7 @@
   .empty { color: var(--muted); padding: 12px; }
   .card-title { margin: 0 0 4px; font-size: 22px; display: flex; align-items: baseline; gap: 10px; }
   .card-title small { font-size: 14px; color: var(--muted); font-weight: normal; }
+  .identity { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 8px; align-items: end; margin: 8px 0 4px; }
   .profile { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 12px 0 20px; }
   .profile .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .profile .item b { display: block; font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
@@ -81,7 +82,7 @@
       <summary>+ 새 고객 만들기</summary>
       <form class="newform" id="new-customer-form">
         <input type="text" id="new-name" placeholder="이름 (필수)" autocomplete="off">
-        <input type="text" id="new-last4" placeholder="전화번호 뒤 4자리 (동명이인 구분용)" inputmode="numeric" maxlength="4" autocomplete="off">
+        <input type="text" id="new-phone" placeholder="전화번호 (예: 010-1234-5678)" inputmode="tel" autocomplete="off">
         <button type="submit">만들기</button>
         <div class="msg" id="new-msg"></div>
       </form>
