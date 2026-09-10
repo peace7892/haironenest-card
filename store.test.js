@@ -1,6 +1,6 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { createState, addCustomer, findCustomers, addMemo, editMemo, memosOf, serialize, deserialize } from './store.js';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { createState, addCustomer, findCustomers, addMemo, editMemo, memosOf, serialize, deserialize } = require('./store.js');
 
 test('이름과 뒤 4자리로 고객을 만든다', () => {
   const s0 = createState();

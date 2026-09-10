@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>헤어원네스트 상담 카드</title>
+<style>
+  :root { --ink: #222; --muted: #777; --line: #ddd; --bg: #faf9f7; --accent: #8a5a3c; --accent-bg: #f3ebe4; --danger: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; font-size: 16px; color: var(--ink); background: var(--bg); }
+  header { padding: 14px 20px; background: #fff; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 12px; }
+  header h1 { margin: 0; font-size: 18px; }
+  header small { color: var(--muted); }
+  main { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 53px); }
+  aside { background: #fff; border-right: 1px solid var(--line); padding: 16px; }
+  section { padding: 20px 28px; max-width: 760px; }
+  input, textarea, button { font: inherit; }
+  input[type=text], textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
+  button { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { background: #fff; color: var(--accent); }
+  button.link { background: none; border: none; color: var(--accent); padding: 0; text-decoration: underline; font-size: 14px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > * { flex: 1; }
+  .row > button { flex: 0 0 auto; }
+  .list { list-style: none; margin: 12px 0 0; padding: 0; }
+  .list li { padding: 10px 12px; border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; }
+  .list li:hover { background: var(--accent-bg); }
+  .list li.active { background: var(--accent-bg); font-weight: 600; }
+  .list li small { color: var(--muted); }
+  .empty { color: var(--muted); padding: 12px; }
+  .card-title { margin: 0 0 4px; font-size: 22px; }
+  .card-sub { color: var(--muted); margin: 0 0 20px; }
+  .memo { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+  .memo .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 14px; margin-bottom: 8px; }
+  .memo .text { white-space: pre-wrap; line-height: 1.6; margin: 0; }
+  .memo .history { margin: 10px 0 0; padding: 10px 12px; background: var(--bg); border-radius: 8px; font-size: 14px; color: var(--muted); }
+  .memo .history p { margin: 4px 0; white-space: pre-wrap; }
+  .msg { min-height: 22px; font-size: 14px; margin-top: 8px; }
+  .msg.error { color: var(--danger); }
+  .msg.ok { color: #2e6b3a; }
+  details summary { cursor: pointer; color: var(--muted); margin: 14px 0 6px; }
+  .newform { display: grid; gap: 8px; }
+  h3 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 24px 0 10px; }
+</style>
+</head>
+<body>
+<header><h1>헤어원네스트 상담 카드</h1><small>V1 · 이 컴퓨터 브라우저에만 저장됩니다</small></header>
+<main>
+  <aside>
+    <input type="text" id="search" placeholder="고객 이름 또는 뒤 4자리로 찾기" autocomplete="off">
+    <ul class="list" id="customer-list"></ul>
+    <details id="new-customer">
+      <summary>+ 새 고객 만들기</summary>
+      <form class="newform" id="new-customer-form">
+        <input type="text" id="new-name" placeholder="이름 (필수)" autocomplete="off">
+        <input type="text" id="new-last4" placeholder="전화번호 뒤 4자리 (동명이인 구분용)" inputmode="numeric" maxlength="4" autocomplete="off">
+        <button type="submit">만들기</button>
+        <div class="msg" id="new-msg"></div>
+      </form>
+    </details>
+  </aside>
+  <section id="card">
+    <div class="empty">왼쪽에서 고객을 고르거나 새 고객을 만드세요.</div>
+  </section>
+</main>
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
