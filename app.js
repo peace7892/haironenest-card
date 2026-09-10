@@ -2,155 +2,216 @@
 (() => {
   const KEY = 'haironenest-card:v1';
   let state = Store.deserialize(localStorage.getItem(KEY));
-  let selectedId = null;
-  let editingMemoId = null;
+  let view = { kind: 'today' }; // { kind: 'today' } | { kind: 'card', id }
+  let editingVisitId = null;
+  let editingProfile = false;
 
   const $ = (sel) => document.querySelector(sel);
-  const now = () => new Date().toISOString();
-  const fmt = (iso) => {
-    const d = new Date(iso);
-    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  };
-  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const pad = (n) => String(n).padStart(2, '0');
+  const now = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+  const today = () => now().slice(0, 10);
+  const fmt = (iso) => `${iso.slice(0, 4)}.${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}`;
+  const esc = (s) => (s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const customerOf = (id) => state.customers.find((c) => c.id === id);
 
   function commit(next) {
     state = next;
     localStorage.setItem(KEY, Store.serialize(state));
   }
+  function showMsg(el, text, kind) { if (el) { el.textContent = text; el.className = `msg ${kind}`; } }
+  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; commit(Store.markToday(state, id, today()).state); render(); }
 
-  function showMsg(el, text, kind) {
-    el.textContent = text;
-    el.className = `msg ${kind}`;
-  }
-
+  // ---- 왼쪽: 고객 목록 ----------------------------------------------------
   function renderCustomers() {
     const list = $('#customer-list');
     const found = Store.findCustomers(state, $('#search').value);
+    const activeId = view.kind === 'card' ? view.id : null;
     if (found.length === 0) {
       list.innerHTML = `<li class="empty">${state.customers.length === 0 ? '아직 고객이 없습니다.' : '찾는 고객이 없습니다.'}</li>`;
       return;
     }
-    list.innerHTML = found
-      .map((c) => `<li data-id="${c.id}" class="${c.id === selectedId ? 'active' : ''}"><span>${esc(c.name)}</span><small>${esc(c.last4)}</small></li>`)
-      .join('');
+    const todayIds = state.today.date === today() ? state.today.customerIds : [];
+    list.innerHTML = found.map((c) => `
+      <li data-id="${c.id}" class="${c.id === activeId ? 'active' : ''}">
+        <span>${esc(c.name)} <small>${esc(c.last4)}</small></span>
+        ${todayIds.includes(c.id) ? '<small>오늘</small>' : `<button type="button" class="small secondary" data-today="${c.id}">오늘</button>`}
+      </li>`).join('');
   }
 
-  function renderCard() {
-    const card = $('#card');
-    const customer = state.customers.find((c) => c.id === selectedId);
-    if (!customer) {
-      card.innerHTML = '<div class="empty">왼쪽에서 고객을 고르거나 새 고객을 만드세요.</div>';
-      return;
-    }
-    const memos = Store.memosOf(state, customer.id);
-    card.innerHTML = `
-      <h2 class="card-title">${esc(customer.name)}</h2>
-      <p class="card-sub">${customer.last4 ? '뒤 4자리 ' + esc(customer.last4) + ' · ' : ''}지난 상담 ${memos.length}건</p>
-      <form id="memo-form">
-        <textarea id="memo-text" placeholder="오늘 상담 — 시술 내용, 고객이 한 말, 다음 방향을 편하게 적으세요"></textarea>
-        <div class="row" style="margin-top:8px"><div class="msg" id="memo-msg"></div><button type="submit">저장</button></div>
+  // ---- 오른쪽: 오늘 명단 ---------------------------------------------------
+  function renderToday() {
+    const list = Store.todayList(state, today());
+    const done = list.filter((t) => t.recorded).length;
+    const items = list.length === 0
+      ? '<div class="empty">아침에 핸드SOS 예약 명단을 보며, 왼쪽에서 고객을 찾아 [오늘]을 누르세요. 없는 고객은 새로 만듭니다.<br>명단에 없던 고객이 와서 카드를 열면 자동으로 여기에 들어옵니다.</div>'
+      : list.map((t) => `
+        <div class="today-item" data-open="${t.customer.id}">
+          <div class="name">${esc(t.customer.name)} <small style="color:var(--muted);font-weight:normal">${esc(t.customer.last4)}</small></div>
+          <span class="status ${t.recorded ? 'done' : 'todo'}">${t.recorded ? '기록 남김' : '아직 안 적음'}</span>
+          <div class="sub">${esc([t.customer.profile.hair, t.customer.profile.talk].filter(Boolean).join(' · ')) || '<i>고정 정보 없음</i>'}</div>
+          <div class="sub">${t.lastNext ? '지난번 다음 방향: ' + esc(t.lastNext) : '지난 방문 기록 없음'}</div>
+        </div>`).join('');
+    return `
+      <h2 class="card-title">오늘 <small>${today().replace(/-/g, '.')} · ${list.length}명 중 ${done}명 기록 남김</small></h2>
+      ${items}`;
+  }
+
+  // ---- 오른쪽: 고객 카드 ---------------------------------------------------
+  function renderCard(c) {
+    const visits = Store.visitsOf(state, c.id);
+    const latestNext = visits.find((v) => v.next)?.next;
+    return `
+      <h2 class="card-title">${esc(c.name)} <small>${c.last4 ? '뒤 4자리 ' + esc(c.last4) + ' · ' : ''}지난 방문 ${visits.length}건</small></h2>
+      ${renderProfile(c)}
+      ${latestNext ? `<div class="next-big"><b>지난번에 다음에 하기로 한 것</b><p>${esc(latestNext)}</p></div>` : ''}
+      <form id="visit-form">
+        <label>오늘 시술 내용과 그 이유 (필수)</label>
+        <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
+        <label>다음에 하기로 한 방향 (비워도 됨)</label>
+        <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담"></textarea>
+        <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
       </form>
-      <h3>지난 상담</h3>
-      ${memos.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : memos.map(renderMemo).join('')}
-    `;
-    $('#memo-text').focus();
+      <h3>지난 방문</h3>
+      ${visits.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : visits.map(renderVisit).join('')}`;
   }
 
-  function renderMemo(m) {
-    if (m.id === editingMemoId) {
+  function renderProfile(c) {
+    const p = c.profile;
+    if (editingProfile) {
       return `
-        <div class="memo" data-memo="${m.id}">
-          <div class="meta"><span>${fmt(m.createdAt)}</span><span>고치는 중</span></div>
-          <textarea id="edit-text">${esc(m.text)}</textarea>
-          <div class="row" style="margin-top:8px">
-            <div class="msg" id="edit-msg"></div>
-            <button type="button" class="secondary" data-action="cancel-edit">취소</button>
-            <button type="button" data-action="save-edit" data-id="${m.id}">고친 내용 저장</button>
+        <div class="profile">
+          <div class="grid">
+            <div><label style="margin-top:0">고객이 한 말 · 생활 습관 · 직업이나 상황</label><textarea id="profile-talk">${esc(p.talk)}</textarea></div>
+            <div><label style="margin-top:0">얼굴형 · 모질 · 두상</label><textarea id="profile-hair">${esc(p.hair)}</textarea></div>
           </div>
+          <div class="row" style="margin-top:8px"><div class="msg" id="profile-msg"></div>
+            <button type="button" class="secondary" data-action="cancel-profile">취소</button>
+            <button type="button" data-action="save-profile">고정 정보 저장</button></div>
         </div>`;
     }
-    const history = m.history.length === 0 ? '' : `
-      <details><summary>고치기 전 내용 ${m.history.length}건</summary>
-        <div class="history">${[...m.history].reverse().map((h) => `<p><small>${fmt(h.replacedAt)}까지</small><br>${esc(h.text)}</p>`).join('')}</div>
+    const history = c.profileHistory.length === 0 ? '' : `
+      <details><summary>고치기 전 고정 정보 ${c.profileHistory.length}건</summary>
+        <div class="history">${[...c.profileHistory].reverse().map((h) => `<p><small>${fmt(h.replacedAt)}까지</small><br>${esc(h.talk) || '—'}<br>${esc(h.hair) || '—'}</p>`).join('')}</div>
       </details>`;
     return `
-      <div class="memo" data-memo="${m.id}">
-        <div class="meta"><span>${fmt(m.createdAt)}</span><button type="button" class="link" data-action="edit" data-id="${m.id}">고치기</button></div>
-        <p class="text">${esc(m.text)}</p>
+      <div class="profile">
+        <div class="grid">
+          <div class="item"><b>고객이 한 말 · 생활 습관 · 직업이나 상황</b><p>${esc(p.talk) || '<i style="color:var(--muted)">아직 없음</i>'}</p></div>
+          <div class="item"><b>얼굴형 · 모질 · 두상</b><p>${esc(p.hair) || '<i style="color:var(--muted)">아직 없음</i>'}</p></div>
+        </div>
+        <div class="row" style="margin-top:10px"><span></span><button type="button" class="link" data-action="edit-profile">고정 정보 ${p.talk || p.hair ? '고치기' : '적기'}</button></div>
+        ${history}
+      </div>`;
+  }
+
+  function renderVisit(v) {
+    if (v.id === editingVisitId) {
+      return `
+        <div class="visit">
+          <div class="meta"><span>${fmt(v.createdAt)}</span><span>고치는 중</span></div>
+          <label style="margin-top:0">오늘 시술 내용과 그 이유</label><textarea id="edit-done">${esc(v.done)}</textarea>
+          <label>다음에 하기로 한 방향</label><textarea id="edit-next" style="min-height:60px">${esc(v.next)}</textarea>
+          <div class="row" style="margin-top:8px"><div class="msg" id="edit-msg"></div>
+            <button type="button" class="secondary" data-action="cancel-edit">취소</button>
+            <button type="button" data-action="save-edit" data-id="${v.id}">고친 내용 저장</button></div>
+        </div>`;
+    }
+    const history = v.history.length === 0 ? '' : `
+      <details><summary>고치기 전 내용 ${v.history.length}건</summary>
+        <div class="history">${[...v.history].reverse().map((h) => `<p><small>${fmt(h.replacedAt)}까지</small><br>${esc(h.done)}${h.next ? '<br>다음: ' + esc(h.next) : ''}</p>`).join('')}</div>
+      </details>`;
+    return `
+      <div class="visit">
+        <div class="meta"><span>${fmt(v.createdAt)}</span><button type="button" class="link" data-action="edit" data-id="${v.id}">고치기</button></div>
+        <div class="field"><b>시술 내용과 이유</b><p>${esc(v.done)}</p></div>
+        ${v.next ? `<div class="field"><b>다음 방향</b><p>${esc(v.next)}</p></div>` : ''}
         ${history}
       </div>`;
   }
 
   function render() {
     renderCustomers();
-    renderCard();
+    const card = $('#card');
+    if (view.kind === 'card' && customerOf(view.id)) card.innerHTML = renderCard(customerOf(view.id));
+    else { view = { kind: 'today' }; card.innerHTML = renderToday(); }
   }
 
-  // 검색
+  // ---- 이벤트 --------------------------------------------------------------
+  $('#home').addEventListener('click', () => { view = { kind: 'today' }; render(); });
   $('#search').addEventListener('input', renderCustomers);
 
-  // 고객 선택
   $('#customer-list').addEventListener('click', (e) => {
+    const todayBtn = e.target.closest('button[data-today]');
+    if (todayBtn) { commit(Store.markToday(state, Number(todayBtn.dataset.today), today()).state); render(); return; }
     const li = e.target.closest('li[data-id]');
-    if (!li) return;
-    selectedId = Number(li.dataset.id);
-    editingMemoId = null;
-    render();
+    if (li) openCard(Number(li.dataset.id));
   });
 
-  // 새 고객
   $('#new-customer-form').addEventListener('submit', (e) => {
     e.preventDefault();
     try {
       const { state: next, customer } = Store.addCustomer(state, { name: $('#new-name').value, last4: $('#new-last4').value });
       commit(next);
-      selectedId = customer.id;
-      editingMemoId = null;
-      $('#new-name').value = '';
-      $('#new-last4').value = '';
-      $('#search').value = '';
+      $('#new-name').value = ''; $('#new-last4').value = ''; $('#search').value = '';
       showMsg($('#new-msg'), `${customer.name} 카드를 만들었습니다`, 'ok');
-      render();
-    } catch (err) {
-      showMsg($('#new-msg'), err.message, 'error');
-    }
-  });
-
-  // 카드 안 동작: 메모 저장 / 고치기 / 고친 내용 저장 / 취소
-  $('#card').addEventListener('submit', (e) => {
-    if (e.target.id !== 'memo-form') return;
-    e.preventDefault();
-    try {
-      const { state: next } = Store.addMemo(state, selectedId, $('#memo-text').value, now());
-      commit(next);
-      render();
-      showMsg($('#memo-msg'), '저장했습니다', 'ok');
-    } catch (err) {
-      showMsg($('#memo-msg'), err.message, 'error');
-    }
+      openCard(customer.id);
+      editingProfile = true; render();
+    } catch (err) { showMsg($('#new-msg'), err.message, 'error'); }
   });
 
   $('#card').addEventListener('click', (e) => {
+    const open = e.target.closest('[data-open]');
+    if (open) { openCard(Number(open.dataset.open)); return; }
     const btn = e.target.closest('button[data-action]');
-    if (!btn) return;
-    const action = btn.dataset.action;
-    if (action === 'edit') {
-      editingMemoId = Number(btn.dataset.id);
-      renderCard();
-      $('#edit-text').focus();
-    } else if (action === 'cancel-edit') {
-      editingMemoId = null;
-      renderCard();
-    } else if (action === 'save-edit') {
-      try {
-        const { state: next } = Store.editMemo(state, Number(btn.dataset.id), $('#edit-text').value, now());
-        commit(next);
-        editingMemoId = null;
-        renderCard();
-      } catch (err) {
-        showMsg($('#edit-msg'), err.message, 'error');
+    if (!btn || view.kind !== 'card') return;
+    const a = btn.dataset.action;
+    try {
+      if (a === 'edit-profile') { editingProfile = true; render(); $('#profile-talk').focus(); }
+      else if (a === 'cancel-profile') { editingProfile = false; render(); }
+      else if (a === 'save-profile') {
+        commit(Store.setProfile(state, view.id, { talk: $('#profile-talk').value, hair: $('#profile-hair').value }, now()).state);
+        editingProfile = false; render();
       }
-    }
+      else if (a === 'edit') { editingVisitId = Number(btn.dataset.id); render(); $('#edit-done').focus(); }
+      else if (a === 'cancel-edit') { editingVisitId = null; render(); }
+      else if (a === 'save-edit') {
+        commit(Store.editVisit(state, Number(btn.dataset.id), { done: $('#edit-done').value, next: $('#edit-next').value }, now()).state);
+        editingVisitId = null; render();
+      }
+    } catch (err) { showMsg($('#edit-msg') || $('#profile-msg'), err.message, 'error'); }
+  });
+
+  $('#card').addEventListener('submit', (e) => {
+    if (e.target.id !== 'visit-form') return;
+    e.preventDefault();
+    try {
+      commit(Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value }, now()).state);
+      render();
+      showMsg($('#visit-msg'), '저장했습니다', 'ok');
+    } catch (err) { showMsg($('#visit-msg'), err.message, 'error'); }
+  });
+
+  // ---- 파일 백업 -----------------------------------------------------------
+  $('#export').addEventListener('click', () => {
+    const blob = new Blob([Store.serialize(state)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `상담카드-백업-${today()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  $('#import').addEventListener('click', () => $('#import-file').click());
+  $('#import-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    const loaded = Store.deserialize(text);
+    if (loaded.customers.length === 0 && state.customers.length > 0 && !confirm('불러올 파일에 고객이 없습니다. 지금 기록을 비우고 이 파일로 바꿀까요?')) { e.target.value = ''; return; }
+    if (state.customers.length > 0 && !confirm(`지금 기록(고객 ${state.customers.length}명)을 이 파일의 내용(고객 ${loaded.customers.length}명)으로 바꿉니다. 계속할까요?`)) { e.target.value = ''; return; }
+    commit(loaded);
+    view = { kind: 'today' };
+    render();
+    e.target.value = '';
   });
 
   render();
