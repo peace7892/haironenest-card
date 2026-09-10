@@ -84,6 +84,7 @@
         <div class="identity">
           <div><label style="margin-top:0">이름</label><input type="text" id="id-name" value="${esc(c.name)}"></div>
           <div><label style="margin-top:0">전화번호</label><input type="text" id="id-phone" inputmode="tel" value="${esc(fmtPhone(c.phone))}" placeholder="010-1234-5678"></div>
+          <div><label style="margin-top:0">소개해 준 분</label><input type="text" id="id-referrer" value="${esc(c.referrer)}" placeholder="없으면 비움"></div>
           <button type="button" class="secondary" data-action="cancel-identity">취소</button>
           <button type="button" data-action="save-identity">저장</button>
         </div>
@@ -92,7 +93,8 @@
     const phoneText = !c.phone ? '번호 없음' : c.phone.length <= 4 ? `뒤 4자리만 있음 ${esc(c.phone)}` : esc(fmtPhone(c.phone));
     return `
       <h2 class="card-title">${esc(c.name)} <small>${phoneText} · 지난 방문 ${visitCount}건</small>
-        <button type="button" class="link" data-action="edit-identity">이름·번호 고치기</button></h2>`;
+        <button type="button" class="link" data-action="edit-identity">이름·번호·소개 고치기</button></h2>
+      <div class="referrer">${c.referrer ? '소개: ' + esc(c.referrer) : '<i>소개해 준 분 없음</i>'}</div>`;
   }
 
   function renderProfile(c) {
@@ -170,9 +172,9 @@
   $('#new-customer-form').addEventListener('submit', (e) => {
     e.preventDefault();
     try {
-      const { state: next, customer } = Store.addCustomer(state, { name: $('#new-name').value, phone: $('#new-phone').value });
+      const { state: next, customer } = Store.addCustomer(state, { name: $('#new-name').value, phone: $('#new-phone').value, referrer: $('#new-referrer').value });
       commit(next);
-      $('#new-name').value = ''; $('#new-phone').value = ''; $('#search').value = '';
+      $('#new-name').value = ''; $('#new-phone').value = ''; $('#new-referrer').value = ''; $('#search').value = '';
       showMsg($('#new-msg'), `${customer.name} 카드를 만들었습니다`, 'ok');
       openCard(customer.id);
       editingProfile = true; render();
@@ -189,7 +191,7 @@
       if (a === 'edit-identity') { editingIdentity = true; render(); $('#id-name').focus(); }
       else if (a === 'cancel-identity') { editingIdentity = false; render(); }
       else if (a === 'save-identity') {
-        commit(Store.editCustomer(state, view.id, { name: $('#id-name').value, phone: $('#id-phone').value }).state);
+        commit(Store.editCustomer(state, view.id, { name: $('#id-name').value, phone: $('#id-phone').value, referrer: $('#id-referrer').value }).state);
         editingIdentity = false; render();
       }
       else if (a === 'edit-profile') { editingProfile = true; render(); $('#profile-talk').focus(); }

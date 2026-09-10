@@ -25,25 +25,25 @@ const Store = (() => {
     }
   }
 
-  function addCustomer(state, { name, phone }) {
+  function addCustomer(state, { name, phone, referrer }) {
     const trimmed = (name ?? '').trim();
     if (!trimmed) throw new Error('이름을 입력하세요');
     const clean = cleanPhone(phone);
     assertPhoneFree(state, clean);
-    const customer = { id: state.nextId, name: trimmed, phone: clean, profile: emptyProfile(), profileHistory: [] };
+    const customer = { id: state.nextId, name: trimmed, phone: clean, referrer: (referrer ?? '').trim(), profile: emptyProfile(), profileHistory: [] };
     return {
       state: { ...state, nextId: state.nextId + 1, customers: [...state.customers, customer] },
       customer,
     };
   }
 
-  function editCustomer(state, customerId, { name, phone }) {
+  function editCustomer(state, customerId, { name, phone, referrer }) {
     const c = requireCustomer(state, customerId);
     const trimmed = (name ?? '').trim();
     if (!trimmed) throw new Error('이름을 입력하세요');
     const clean = cleanPhone(phone);
     assertPhoneFree(state, clean, customerId);
-    const updated = { ...c, name: trimmed, phone: clean };
+    const updated = { ...c, name: trimmed, phone: clean, referrer: (referrer ?? '').trim() };
     return {
       state: { ...state, customers: state.customers.map(x => (x.id === customerId ? updated : x)) },
       customer: updated,
@@ -157,7 +157,7 @@ const Store = (() => {
   // 이전 버전(자유 메모 한 칸: memos[].text)을 방문 기록(visits[].done)으로 옮긴다.
   function migrate(p) {
     const customers = p.customers.map(({ last4, ...c }) => ({
-      ...c, phone: c.phone ?? last4 ?? '', profile: c.profile ?? emptyProfile(), profileHistory: c.profileHistory ?? [],
+      ...c, phone: c.phone ?? last4 ?? '', referrer: c.referrer ?? '', profile: c.profile ?? emptyProfile(), profileHistory: c.profileHistory ?? [],
     }));
     const fromMemos = (p.memos ?? []).map(m => ({
       id: m.id, customerId: m.customerId, done: m.text, next: '', createdAt: m.createdAt,

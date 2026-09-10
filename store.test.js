@@ -173,3 +173,20 @@ test('옛 데이터의 뒤 4자리(last4)는 phone으로 옮겨져 그대로 보
   assert.equal(state.customers[0].last4, undefined);
   assert.deepEqual(findCustomers(state, '1234').map(c => c.name), ['김OO']);
 });
+
+test('소개해 준 분을 적을 수 있고, 비워도 된다', () => {
+  const { customer } = addCustomer(createState(), { name: '김OO', phone: '01012345678', referrer: ' 박OO 언니 ' });
+  assert.equal(customer.referrer, '박OO 언니');
+  assert.equal(addCustomer(createState(), { name: '이OO', phone: '' }).customer.referrer, '');
+});
+
+test('소개해 준 분을 나중에 고칠 수 있다', () => {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01012345678' });
+  ({ state } = editCustomer(state, customer.id, { name: '김OO', phone: '01012345678', referrer: '블로그 보고' }));
+  assert.equal(state.customers[0].referrer, '블로그 보고');
+});
+
+test('옛 데이터에는 소개 칸이 빈 값으로 생긴다', () => {
+  const state = deserialize(JSON.stringify({ nextId: 2, customers: [{ id: 1, name: '김OO', phone: '01012345678' }], visits: [] }));
+  assert.equal(state.customers[0].referrer, '');
+});
