@@ -55,11 +55,21 @@
   details summary { cursor: pointer; color: var(--muted); margin: 10px 0 6px; }
   .newform { display: grid; gap: 8px; }
   h3 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 24px 0 10px; }
-  .today-item { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
+  .today-item { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; cursor: pointer; display: grid; grid-template-columns: 30px 106px 1fr auto; gap: 4px 12px; align-items: start; }
   .today-item:hover { background: var(--accent-bg); }
-  .today-item .name { font-weight: 600; font-size: 17px; }
-  .today-item .sub { color: var(--muted); font-size: 14px; grid-column: 1; white-space: pre-wrap; }
-  .today-item .status { font-size: 13px; padding: 3px 8px; border-radius: 999px; align-self: start; }
+  .today-item .no { grid-column: 1; grid-row: 1 / span 3; align-self: center; text-align: center; font-size: 19px; font-weight: 700; color: var(--muted); }
+  .today-item .when { grid-column: 2; grid-row: 1 / span 3; align-self: center; }
+  .today-item .name { grid-column: 3; font-weight: 600; font-size: 17px; }
+  .today-item .sub { grid-column: 3; color: var(--muted); font-size: 14px; white-space: pre-wrap; }
+  .today-item .right { grid-column: 4; grid-row: 1 / span 3; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  .today-item .status { font-size: 13px; padding: 3px 8px; border-radius: 999px; }
+  .at { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-size: 16px; text-align: center; letter-spacing: 0.5px; }
+  .at:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .today-item .when .at { width: 100%; }
+  .add-today { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+  .add-today .row > .at { flex: 0 0 110px; }
+  .add-today .hits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .add-today .hint { color: var(--muted); font-size: 14px; margin-top: 8px; }
   .status.done { background: #e4f1e6; color: var(--ok); }
   .status.todo { background: #fbe9e7; color: var(--danger); }
   .tools { display: flex; gap: 8px; align-items: center; }

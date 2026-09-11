@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -250,7 +250,7 @@ test('완전히 지우면 고객도 방문 기록도 사라진다', () => {
   assert.deepEqual(state.customers, []);
   assert.deepEqual(state.visits, [], '그 고객의 방문 기록도 함께 사라진다');
   assert.deepEqual(deletedCustomers(state), []);
-  assert.deepEqual(state.today.customerIds, []);
+  assert.deepEqual(state.today.entries, []);
 });
 
 test('완전히 지워도 다른 고객의 방문 기록은 건드리지 않는다', () => {
@@ -277,4 +277,110 @@ test('지우기 칸이 없던 옛 백업을 불러오면 모두 살아 있는 �
   const state = deserialize(old);
   assert.equal(state.customers[0].deletedAt, null);
   assert.deepEqual(findCustomers(state, '').map(c => c.name), ['김OO']);
+});
+
+// ---- 오늘 명단: 예약 시간과 순서 -------------------------------------------
+
+function threeCustomers() {
+  let { state, customer: kim } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  let lee, park;
+  ({ state, customer: lee } = addCustomer(state, { name: '이OO', phone: '01033334444' }));
+  ({ state, customer: park } = addCustomer(state, { name: '박OO', phone: '01055556666' }));
+  return { state, kim: kim.id, lee: lee.id, park: park.id };
+}
+const D = '2026-09-11';
+const shown = (state) => todayList(state, D).map(t => `${t.order} ${t.at || '시간없음'} ${t.customer.name}`);
+
+test('예약 시간을 적으면 올린 순서와 상관없이 시간순으로 줄을 세운다', () => {
+  let { state, kim, lee, park } = threeCustomers();
+  ({ state } = markToday(state, kim, D, '14:00'));
+  ({ state } = markToday(state, lee, D, '10:00'));
+  ({ state } = markToday(state, park, D, '11:30'));
+  assert.deepEqual(shown(state), ['1 10:00 이OO', '2 11:30 박OO', '3 14:00 김OO']);
+});
+
+test('시간을 안 적은 사람은 적은 사람 뒤에, 올린 순서대로 붙는다', () => {
+  let { state, kim, lee, park } = threeCustomers();
+  ({ state } = markToday(state, kim, D, ''));
+  ({ state } = markToday(state, lee, D, '10:00'));
+  ({ state } = markToday(state, park, D));
+  assert.deepEqual(shown(state), ['1 10:00 이OO', '2 시간없음 김OO', '3 시간없음 박OO']);
+});
+
+test('시간은 930, 1030, 9:30 처럼 적어도 HH:MM으로 맞춰 준다', () => {
+  let { state, kim, lee, park } = threeCustomers();
+  ({ state } = markToday(state, kim, D, '930'));
+  ({ state } = markToday(state, lee, D, '1030'));
+  ({ state } = markToday(state, park, D, '9:05'));
+  assert.deepEqual(shown(state), ['1 09:05 박OO', '2 09:30 김OO', '3 10:30 이OO']);
+});
+
+test('시간이 말이 안 되면 막고 알려준다', () => {
+  const { state, kim } = threeCustomers();
+  assert.throws(() => markToday(state, kim, D, '25:00'), /10:00 처럼/);
+  assert.throws(() => markToday(state, kim, D, '10:99'), /10:00 처럼/);
+  assert.throws(() => markToday(state, kim, D, '아무거나'), /10:00 처럼/);
+});
+
+test('명단에 올린 뒤에 시간을 고치면 줄 순서도 따라 바뀐다', () => {
+  let { state, kim, lee } = threeCustomers();
+  ({ state } = markToday(state, kim, D, '10:00'));
+  ({ state } = markToday(state, lee, D, '11:00'));
+  ({ state } = setTodayTime(state, lee, D, '09:00'));
+  assert.deepEqual(shown(state), ['1 09:00 이OO', '2 10:00 김OO']);
+  ({ state } = setTodayTime(state, lee, D, ''));
+  assert.deepEqual(shown(state), ['1 10:00 김OO', '2 시간없음 이OO'], '시간을 지우면 뒤로 간다');
+});
+
+test('카드를 열어 명단에 다시 올라가도 적어둔 시간은 지워지지 않는다', () => {
+  let { state, kim } = threeCustomers();
+  ({ state } = markToday(state, kim, D, '10:00'));
+  ({ state } = markToday(state, kim, D));
+  assert.deepEqual(shown(state), ['1 10:00 김OO'], '한 번만 들어가고 시간도 그대로');
+});
+
+test('예약이 취소되면 명단에서만 빼고 고객과 기록은 남는다', () => {
+  let { state, kim, lee } = threeCustomers();
+  ({ state } = markToday(state, kim, D, '10:00'));
+  ({ state } = markToday(state, lee, D, '11:00'));
+  ({ state } = addVisit(state, kim, { done: '지난 시술' }, '2026-09-01T10:00:00'));
+  ({ state } = unmarkToday(state, kim, D));
+  assert.deepEqual(shown(state), ['1 11:00 이OO']);
+  assert.equal(findCustomers(state, '김').length, 1, '고객은 그대로 있다');
+  assert.equal(visitsOf(state, kim).length, 1, '방문 기록도 그대로 있다');
+});
+
+test('명단에 없는 사람을 빼거나 시간을 고쳐도 아무 일도 안 생긴다', () => {
+  let { state, kim, lee } = threeCustomers();
+  ({ state } = markToday(state, kim, D, '10:00'));
+  const before = shown(state);
+  ({ state } = unmarkToday(state, lee, D));
+  ({ state } = setTodayTime(state, lee, D, '09:00'));
+  assert.deepEqual(shown(state), before);
+});
+
+test('날짜가 바뀌면 어제 명단은 안 보이고 새 명단이 시작된다', () => {
+  let { state, kim, lee } = threeCustomers();
+  ({ state } = markToday(state, kim, D, '10:00'));
+  ({ state } = markToday(state, lee, '2026-09-12', '11:00'));
+  assert.deepEqual(todayList(state, D), []);
+  assert.deepEqual(shown_on(state, '2026-09-12'), ['1 11:00 이OO']);
+  function shown_on(st, d) { return todayList(st, d).map(t => `${t.order} ${t.at || '시간없음'} ${t.customer.name}`); }
+});
+
+test('시간 칸이 없던 옛 백업의 오늘 명단도 그대로 읽는다', () => {
+  const old = JSON.stringify({
+    nextId: 3,
+    customers: [{ id: 1, name: '김OO', phone: '01011112222' }, { id: 2, name: '이OO', phone: '01033334444' }],
+    visits: [], today: { date: D, customerIds: [2, 1] },
+  });
+  const state = deserialize(old);
+  assert.deepEqual(shown(state), ['1 시간없음 이OO', '2 시간없음 김OO'], '올린 순서 그대로');
+});
+
+test('오늘 명단도 저장했다 꺼내면 그대로다', () => {
+  let { state, kim, lee } = threeCustomers();
+  ({ state } = markToday(state, kim, D, '10:00'));
+  ({ state } = markToday(state, lee, D, ''));
+  assert.deepEqual(deserialize(serialize(state)), state);
 });

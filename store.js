@@ -5,7 +5,7 @@ const Store = (() => {
   const emptyProfile = () => ({ talk: '', hair: '' });
 
   function createState() {
-    return { nextId: 1, customers: [], visits: [], today: { date: '', customerIds: [] } };
+    return { nextId: 1, customers: [], visits: [], today: { date: '', entries: [] } };
   }
 
   // ---- 고객 --------------------------------------------------------------
@@ -98,7 +98,7 @@ const Store = (() => {
       state: {
         ...state,
         customers: state.customers.map(x => (x.id === customerId ? updated : x)),
-        today: { ...state.today, customerIds: state.today.customerIds.filter(id => id !== customerId) },
+        today: { ...state.today, entries: state.today.entries.filter(e => e.customerId !== customerId) },
       },
       customer: updated,
     };
@@ -123,7 +123,7 @@ const Store = (() => {
         ...state,
         customers: state.customers.filter(x => x.id !== customerId),
         visits: state.visits.filter(v => v.customerId !== customerId),
-        today: { ...state.today, customerIds: state.today.customerIds.filter(id => id !== customerId) },
+        today: { ...state.today, entries: state.today.entries.filter(e => e.customerId !== customerId) },
       },
     };
   }
@@ -185,22 +185,72 @@ const Store = (() => {
 
   // ---- 오늘 명단 ----------------------------------------------------------
 
-  function markToday(state, customerId, date) {
+  // 명단 한 줄은 { customerId, at }. at은 'HH:MM'이거나 ''(시간 안 정함).
+  // 시간을 적은 사람이 시간순으로 앞에 오고, 안 적은 사람은 올린 순서대로 뒤에 붙는다.
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  // '10:00' '9:30' '930' '1030' '10' 을 모두 받아 'HH:MM'으로 맞춘다. 빈 값은 빈 값 그대로.
+  function cleanTime(at) {
+    const raw = (at ?? '').trim();
+    if (!raw) return '';
+    const d = raw.replace(/\D/g, '');
+    let h, m;
+    if (/^\d{1,2}$/.test(d)) { h = Number(d); m = 0; }
+    else if (/^\d{3}$/.test(d)) { h = Number(d.slice(0, 1)); m = Number(d.slice(1)); }
+    else if (/^\d{4}$/.test(d)) { h = Number(d.slice(0, 2)); m = Number(d.slice(2)); }
+    else throw new Error('시간은 10:00 처럼 적으세요');
+    if (h > 23 || m > 59) throw new Error('시간은 10:00 처럼 적으세요');
+    return `${pad2(h)}:${pad2(m)}`;
+  }
+
+  const entriesOn = (state, date) => (state.today.date === date ? state.today.entries : []);
+
+  // 이미 명단에 있으면 시간만 채운다(비워 부르면 적어둔 시간을 지우지 않는다).
+  function markToday(state, customerId, date, at) {
     requireCustomer(state, customerId);
-    const ids = state.today.date === date ? state.today.customerIds : [];
-    if (ids.includes(customerId)) return { state };
-    return { state: { ...state, today: { date, customerIds: [...ids, customerId] } } };
+    const time = cleanTime(at);
+    const entries = entriesOn(state, date);
+    const already = entries.some(e => e.customerId === customerId);
+    const next = already
+      ? entries.map(e => (e.customerId === customerId ? { ...e, at: time || e.at } : e))
+      : [...entries, { customerId, at: time }];
+    return { state: { ...state, today: { date, entries: next } } };
+  }
+
+  function setTodayTime(state, customerId, date, at) {
+    const time = cleanTime(at);
+    const entries = entriesOn(state, date);
+    if (!entries.some(e => e.customerId === customerId)) return { state };
+    return { state: { ...state, today: { date, entries: entries.map(e => (e.customerId === customerId ? { ...e, at: time } : e)) } } };
+  }
+
+  // 예약이 취소되거나 잘못 올린 사람을 명단에서만 뺀다. 고객과 기록은 그대로다.
+  function unmarkToday(state, customerId, date) {
+    const entries = entriesOn(state, date);
+    return { state: { ...state, today: { date, entries: entries.filter(e => e.customerId !== customerId) } } };
   }
 
   function todayList(state, date) {
     if (state.today.date !== date) return [];
-    const live = (id) => { const c = state.customers.find(x => x.id === id); return c && !c.deletedAt; };
-    return state.today.customerIds.filter(live).map(id => {
-      const customer = state.customers.find(c => c.id === id);
-      const visits = visitsOf(state, id);
+    const live = state.today.entries.filter(e => {
+      const c = state.customers.find(x => x.id === e.customerId);
+      return c && !c.deletedAt;
+    });
+    const byTime = live
+      .map((e, i) => ({ e, i }))
+      .sort((a, b) => {
+        if (a.e.at && b.e.at) return a.e.at < b.e.at ? -1 : a.e.at > b.e.at ? 1 : a.i - b.i;
+        if (a.e.at) return -1;
+        if (b.e.at) return 1;
+        return a.i - b.i;
+      });
+    return byTime.map(({ e }, idx) => {
+      const customer = state.customers.find(c => c.id === e.customerId);
+      const visits = visitsOf(state, e.customerId);
       const todays = visits.filter(v => v.createdAt.startsWith(date));
       const previous = visits.find(v => !v.createdAt.startsWith(date));
-      return { customer, recorded: todays.length > 0, lastNext: previous ? previous.next : '' };
+      return { order: idx + 1, at: e.at, customer, recorded: todays.length > 0, lastNext: previous ? previous.next : '' };
     });
   }
 
@@ -228,11 +278,23 @@ const Store = (() => {
       history: (m.history ?? []).map(h => ({ done: h.text, next: '', replacedAt: h.replacedAt })),
     }));
     const visits = [...(p.visits ?? []), ...fromMemos];
-    const today = p.today && Array.isArray(p.today.customerIds) ? p.today : { date: '', customerIds: [] };
+    const today = migrateToday(p.today);
     return { nextId: p.nextId ?? 1, customers, visits, today };
   }
 
-  return { createState, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize };
+  // 옛 백업은 오늘 명단이 번호 목록(customerIds)이었다. 시간 없는 줄로 옮긴다.
+  function migrateToday(t) {
+    if (!t || typeof t.date !== 'string') return { date: '', entries: [] };
+    if (Array.isArray(t.entries)) {
+      return { date: t.date, entries: t.entries.filter(e => e && typeof e.customerId === 'number').map(e => ({ customerId: e.customerId, at: e.at ?? '' })) };
+    }
+    if (Array.isArray(t.customerIds)) {
+      return { date: t.date, entries: t.customerIds.map(id => ({ customerId: id, at: '' })) };
+    }
+    return { date: '', entries: [] };
+  }
+
+  return { createState, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

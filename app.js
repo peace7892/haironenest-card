@@ -32,7 +32,7 @@
       list.innerHTML = `<li class="empty">${state.customers.length === 0 ? '아직 고객이 없습니다.' : '찾는 고객이 없습니다.'}</li>`;
       return;
     }
-    const todayIds = state.today.date === today() ? state.today.customerIds : [];
+    const todayIds = state.today.date === today() ? state.today.entries.map((e) => e.customerId) : [];
     list.innerHTML = found.map((c) => `
       <li data-id="${c.id}" class="${c.id === activeId ? 'active' : ''}">
         <span>${esc(c.name)} <small>${esc(Store.maskPhone(c.phone))}</small></span>
@@ -68,17 +68,63 @@
     const list = Store.todayList(state, today());
     const done = list.filter((t) => t.recorded).length;
     const items = list.length === 0
-      ? '<div class="empty">아침에 핸드SOS 예약 명단을 보며, 왼쪽에서 고객을 찾아 [오늘]을 누르세요. 없는 고객은 새로 만듭니다.<br>명단에 없던 고객이 와서 카드를 열면 자동으로 여기에 들어옵니다.</div>'
+      ? '<div class="empty">위 칸에 예약 시간과 이름을 넣어 오늘 올 고객을 쭉 올려두세요.<br>손님이 다녀가면 그 줄을 눌러 기록을 남깁니다.</div>'
       : list.map((t) => `
         <div class="today-item" data-open="${t.customer.id}">
+          <div class="no">${t.order}</div>
+          <div class="when"><input type="text" class="at" inputmode="numeric" data-at="${t.customer.id}" value="${esc(t.at)}" placeholder="--:--" title="예약 시간. 1400처럼 치면 14:00이 됩니다"></div>
           <div class="name">${esc(t.customer.name)} <small style="color:var(--muted);font-weight:normal">${esc(Store.maskPhone(t.customer.phone))}</small></div>
-          <span class="status ${t.recorded ? 'done' : 'todo'}">${t.recorded ? '기록 남김' : '아직 안 적음'}</span>
           <div class="sub">${esc([t.customer.profile.hair, t.customer.profile.talk].filter(Boolean).join(' · ')) || '<i>고정 정보 없음</i>'}</div>
           <div class="sub">${t.lastNext ? '지난번 다음 방향: ' + esc(t.lastNext) : '지난 방문 기록 없음'}</div>
+          <div class="right">
+            <span class="status ${t.recorded ? 'done' : 'todo'}">${t.recorded ? '기록 남김' : '아직 안 적음'}</span>
+            <button type="button" class="link small" data-drop="${t.customer.id}">명단에서 빼기</button>
+          </div>
         </div>`).join('');
     return `
       <h2 class="card-title">오늘 <small>${today().replace(/-/g, '.')} · ${list.length}명 중 ${done}명 기록 남김</small></h2>
+      <div class="add-today">
+        <div class="row">
+          <input type="text" class="at" id="add-at" inputmode="numeric" placeholder="10:00" autocomplete="off" title="예약 시간. 1400처럼 치면 14:00이 됩니다. 비워도 됩니다">
+          <input type="text" id="add-name" placeholder="이름이나 전화번호를 치면 아래에 뜹니다" autocomplete="off">
+        </div>
+        <div id="add-hits"></div>
+      </div>
+      <div class="msg" id="today-msg"></div>
       ${items}`;
+  }
+
+  // 이름을 칠 때마다 후보만 다시 그린다. 화면 전체를 다시 그리면 글자를 치던 자리가 날아간다.
+  function renderAddHits() {
+    const box = $('#add-hits');
+    if (!box) return;
+    const q = $('#add-name').value.trim();
+    if (!q) { box.innerHTML = '<div class="hint">아침에 예약 명단을 보며 시간과 이름을 넣으세요. 시간은 비워도 되고, 나중에 고칠 수 있습니다.</div>'; return; }
+    const onList = new Set(Store.todayList(state, today()).map((t) => t.customer.id));
+    const hits = Store.findCustomers(state, q).filter((c) => !onList.has(c.id)).slice(0, 8);
+    const looksLikeName = /[^\d\s-]/.test(q);
+    box.innerHTML = `
+      <div class="hits">
+        ${hits.map((c) => `<button type="button" class="secondary small" data-add="${c.id}">${esc(c.name)} <small>${esc(Store.maskPhone(c.phone))}</small></button>`).join('')}
+        ${looksLikeName ? `<button type="button" class="small" data-add-new="1">+ ${esc(q)} 새 고객으로 올리기</button>` : ''}
+      </div>
+      ${hits.length === 0 && !looksLikeName ? '<div class="hint">그 번호를 쓰는 고객이 없습니다. 이름으로 찾아보세요.</div>' : ''}`;
+  }
+
+  // 명단에 한 명 올리기. newName을 주면 그 이름으로 새 고객을 만들어 올린다.
+  function addToToday(customerId, newName) {
+    const at = $('#add-at').value;
+    try {
+      let next = state;
+      let id = customerId;
+      if (newName) {
+        const made = Store.addCustomer(state, { name: newName, phone: '', referrer: '' });
+        next = made.state; id = made.customer.id;
+      }
+      commit(Store.markToday(next, id, today(), at).state);
+      render();
+      $('#add-at').focus();
+    } catch (err) { showMsg($('#today-msg'), err.message, 'error'); }
   }
 
   // ---- 오른쪽: 고객 카드 ---------------------------------------------------
@@ -183,7 +229,7 @@
     renderTrash();
     const card = $('#card');
     if (view.kind === 'card' && customerOf(view.id)) card.innerHTML = renderCard(customerOf(view.id));
-    else { view = { kind: 'today' }; card.innerHTML = renderToday(); }
+    else { view = { kind: 'today' }; card.innerHTML = renderToday(); renderAddHits(); }
   }
 
   // ---- 이벤트 --------------------------------------------------------------
@@ -210,6 +256,16 @@
   });
 
   $('#card').addEventListener('click', (e) => {
+    // 시간 칸을 누른 것뿐인데 카드가 열려버리면 안 된다
+    if (e.target.closest('input, textarea')) return;
+
+    const drop = e.target.closest('button[data-drop]');
+    if (drop) { commit(Store.unmarkToday(state, Number(drop.dataset.drop), today()).state); render(); return; }
+    const add = e.target.closest('button[data-add]');
+    if (add) { addToToday(Number(add.dataset.add)); return; }
+    const addNew = e.target.closest('button[data-add-new]');
+    if (addNew) { addToToday(null, $('#add-name').value.trim()); return; }
+
     const open = e.target.closest('[data-open]');
     if (open) { openCard(Number(open.dataset.open)); return; }
     const btn = e.target.closest('button[data-action]');
@@ -269,6 +325,33 @@
       trashOpen = true;
       if (view.kind === 'card' && view.id === id) view = { kind: 'today' };
       render();
+    }
+  });
+
+  $('#card').addEventListener('input', (e) => {
+    if (e.target.id === 'add-name') renderAddHits();
+  });
+
+  // 시간 → Tab → 이름 → Enter 로 한 명씩 빠르게 올린다
+  $('#card').addEventListener('keydown', (e) => {
+    if (e.target.id !== 'add-name' || e.key !== 'Enter') return;
+    e.preventDefault();
+    const first = $('#add-hits button[data-add]') || $('#add-hits button[data-add-new]');
+    if (first) first.click();
+  });
+
+  // 명단에 올린 뒤 시간을 고치면 줄 순서도 따라 바뀐다
+  $('#card').addEventListener('change', (e) => {
+    const at = e.target.closest('input[data-at]');
+    if (!at) return;
+    const id = Number(at.dataset.at);
+    try {
+      commit(Store.setTodayTime(state, id, today(), at.value).state);
+      render();
+    } catch (err) {
+      const kept = Store.todayList(state, today()).find((t) => t.customer.id === id);
+      at.value = kept ? kept.at : '';
+      showMsg($('#today-msg'), err.message, 'error');
     }
   });
 
