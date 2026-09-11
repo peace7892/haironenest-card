@@ -63,6 +63,13 @@
   .status.done { background: #e4f1e6; color: var(--ok); }
   .status.todo { background: #fbe9e7; color: var(--danger); }
   .tools { display: flex; gap: 8px; align-items: center; }
+  button.danger { background: #fff; border-color: var(--danger); color: var(--danger); }
+  button.link.danger { border: none; background: none; color: var(--danger); padding: 0; text-decoration: underline; font-size: 14px; }
+  .trash { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 4px; }
+  .trash .list li { display: block; cursor: default; padding: 8px 12px; }
+  .trash .list li:hover { background: none; }
+  .trash .actions { display: flex; gap: 6px; margin-top: 6px; }
+  .trash .note { color: var(--muted); font-size: 13px; padding: 0 12px; margin: 2px 0 0; }
 </style>
 </head>
 <body>
@@ -89,6 +96,7 @@
         <div class="msg" id="new-msg"></div>
       </form>
     </details>
+    <div id="trash"></div>
   </aside>
   <section id="card"></section>
 </main>

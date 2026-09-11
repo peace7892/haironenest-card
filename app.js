@@ -6,6 +6,7 @@
   let editingVisitId = null;
   let editingProfile = false;
   let editingIdentity = false;
+  let trashOpen = false;
 
   const $ = (sel) => document.querySelector(sel);
   const pad = (n) => String(n).padStart(2, '0');
@@ -37,6 +38,29 @@
         <span>${esc(c.name)} <small>${esc(Store.maskPhone(c.phone))}</small></span>
         ${todayIds.includes(c.id) ? '<small>오늘</small>' : `<button type="button" class="small secondary" data-today="${c.id}">오늘</button>`}
       </li>`).join('');
+  }
+
+  // ---- 왼쪽 아래: 지운 고객 (되살리기 / 완전히 지우기) ----------------------
+  function renderTrash() {
+    const box = $('#trash');
+    const gone = Store.deletedCustomers(state);
+    if (gone.length === 0) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <details class="trash" ${trashOpen ? 'open' : ''}>
+        <summary>지운 고객 ${gone.length}명</summary>
+        <p class="note">되살리면 방문 기록까지 그대로 돌아옵니다.</p>
+        <ul class="list">
+          ${gone.map((c) => `
+            <li>
+              <span>${esc(c.name)} <small>${esc(Store.maskPhone(c.phone))}</small></span>
+              <span class="actions">
+                <button type="button" class="small secondary" data-restore="${c.id}">되살리기</button>
+                <button type="button" class="small danger" data-purge="${c.id}">완전히 지우기</button>
+              </span>
+            </li>`).join('')}
+        </ul>
+        <div class="msg" id="trash-msg"></div>
+      </details>`;
   }
 
   // ---- 오른쪽: 오늘 명단 ---------------------------------------------------
@@ -88,7 +112,10 @@
           <button type="button" class="secondary" data-action="cancel-identity">취소</button>
           <button type="button" data-action="save-identity">저장</button>
         </div>
-        <div class="msg" id="identity-msg"></div>`;
+        <div class="row" style="margin-top:4px">
+          <div class="msg" id="identity-msg"></div>
+          <button type="button" class="link danger" data-action="delete-customer">이 고객 지우기</button>
+        </div>`;
     }
     const phoneText = !c.phone ? '번호 없음' : c.phone.length <= 4 ? `뒤 4자리만 있음 ${esc(c.phone)}` : esc(fmtPhone(c.phone));
     return `
@@ -153,6 +180,7 @@
 
   function render() {
     renderCustomers();
+    renderTrash();
     const card = $('#card');
     if (view.kind === 'card' && customerOf(view.id)) card.innerHTML = renderCard(customerOf(view.id));
     else { view = { kind: 'today' }; card.innerHTML = renderToday(); }
@@ -194,6 +222,13 @@
         commit(Store.editCustomer(state, view.id, { name: $('#id-name').value, phone: $('#id-phone').value, referrer: $('#id-referrer').value }).state);
         editingIdentity = false; render();
       }
+      else if (a === 'delete-customer') {
+        const c = customerOf(view.id);
+        const n = Store.visitsOf(state, view.id).length;
+        if (!confirm(`${c.name} 고객을 목록에서 지웁니다.\n\n방문 기록 ${n}건도 함께 감춰집니다.\n왼쪽 아래 [지운 고객]에서 되살릴 수 있습니다.\n\n지울까요?`)) return;
+        commit(Store.deleteCustomer(state, view.id, now()).state);
+        editingIdentity = false; trashOpen = true; view = { kind: 'today' }; render();
+      }
       else if (a === 'edit-profile') { editingProfile = true; render(); $('#profile-talk').focus(); }
       else if (a === 'cancel-profile') { editingProfile = false; render(); }
       else if (a === 'save-profile') {
@@ -207,6 +242,34 @@
         editingVisitId = null; render();
       }
     } catch (err) { showMsg($('#identity-msg') || $('#edit-msg') || $('#profile-msg'), err.message, 'error'); }
+  });
+
+  $('#trash').addEventListener('click', (e) => {
+    if (e.target.closest('summary')) { trashOpen = !trashOpen; return; }
+
+    const restore = e.target.closest('button[data-restore]');
+    if (restore) {
+      try {
+        const { state: next, customer } = Store.restoreCustomer(state, Number(restore.dataset.restore));
+        commit(next); trashOpen = true; render();
+        showMsg($('#trash-msg'), `${customer.name} 고객을 되살렸습니다`, 'ok');
+      } catch (err) { showMsg($('#trash-msg'), err.message, 'error'); }
+      return;
+    }
+
+    // 완전히 지우기는 되돌릴 수 없으므로 두 번 묻는다.
+    const purge = e.target.closest('button[data-purge]');
+    if (purge) {
+      const id = Number(purge.dataset.purge);
+      const c = customerOf(id);
+      const n = Store.visitsOf(state, id).length;
+      if (!confirm(`${c.name} 고객과 방문 기록 ${n}건을 완전히 지웁니다.\n\n이건 되돌릴 수 없습니다.\n\n계속할까요?`)) return;
+      if (!confirm(`마지막 확인입니다.\n\n${c.name} 고객의 기록이 영영 사라집니다.`)) return;
+      commit(Store.purgeCustomer(state, id).state);
+      trashOpen = true;
+      if (view.kind === 'card' && view.id === id) view = { kind: 'today' };
+      render();
+    }
   });
 
   $('#card').addEventListener('submit', (e) => {

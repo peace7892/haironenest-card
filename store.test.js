@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, addCustomer, editCustomer, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -189,4 +189,92 @@ test('소개해 준 분을 나중에 고칠 수 있다', () => {
 test('옛 데이터에는 소개 칸이 빈 값으로 생긴다', () => {
   const state = deserialize(JSON.stringify({ nextId: 2, customers: [{ id: 1, name: '김OO', phone: '01012345678' }], visits: [] }));
   assert.equal(state.customers[0].referrer, '');
+});
+
+// ---- 고객 지우기 ---------------------------------------------------------
+
+// 방문 기록 1건과 오늘 명단까지 올라간 고객 한 명을 만들어 둔다.
+function oneWithVisit() {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  ({ state } = addVisit(state, customer.id, { done: '레이어드 컷' }, '2026-09-11T10:00:00'));
+  ({ state } = markToday(state, customer.id, '2026-09-11'));
+  return { state, id: customer.id };
+}
+
+test('지운 고객은 목록·검색·오늘 명단에서 모두 빠진다', () => {
+  const { state: s0, id } = oneWithVisit();
+  assert.equal(todayList(s0, '2026-09-11').length, 1);
+  const { state } = deleteCustomer(s0, id, '2026-09-11T20:00:00');
+  assert.deepEqual(findCustomers(state, ''), []);
+  assert.deepEqual(findCustomers(state, '김'), []);
+  assert.deepEqual(todayList(state, '2026-09-11'), []);
+  assert.equal(s0.customers[0].deletedAt, null, '원래 상태는 바뀌지 않는다');
+});
+
+test('지워도 기록은 남아 있어서 되살리면 방문 기록까지 그대로 돌아온다', () => {
+  const { state: s0, id } = oneWithVisit();
+  const { state: gone } = deleteCustomer(s0, id, '2026-09-11T20:00:00');
+  assert.deepEqual(deletedCustomers(gone).map(c => c.name), ['김OO']);
+  const { state } = restoreCustomer(gone, id);
+  assert.deepEqual(findCustomers(state, '').map(c => c.name), ['김OO']);
+  assert.deepEqual(deletedCustomers(state), []);
+  assert.equal(visitsOf(state, id).length, 1);
+});
+
+test('지운 고객에게는 방문 기록이나 고정 정보를 남길 수 없다', () => {
+  const { state: s0, id } = oneWithVisit();
+  const { state } = deleteCustomer(s0, id, '2026-09-11T20:00:00');
+  assert.throws(() => addVisit(state, id, { done: '컷' }, '2026-09-12T10:00:00'), /지운 고객/);
+  assert.throws(() => setProfile(state, id, { talk: 'ㄱ', hair: 'ㄴ' }, '2026-09-12T10:00:00'), /지운 고객/);
+  assert.throws(() => markToday(state, id, '2026-09-12'), /지운 고객/);
+});
+
+test('지운 고객이 쓰던 번호로 새 고객을 만들 수 있다', () => {
+  const { state: s0, id } = oneWithVisit();
+  const { state } = deleteCustomer(s0, id, '2026-09-11T20:00:00');
+  const { customer } = addCustomer(state, { name: '이OO', phone: '01011112222' });
+  assert.equal(customer.name, '이OO');
+});
+
+test('같은 번호를 쓰는 고객이 있으면 되살리지 못하고 이유를 알려준다', () => {
+  const { state: s0, id } = oneWithVisit();
+  let { state } = deleteCustomer(s0, id, '2026-09-11T20:00:00');
+  ({ state } = addCustomer(state, { name: '이OO', phone: '01011112222' }));
+  assert.throws(() => restoreCustomer(state, id), /이OO.*되살릴 수 없습니다/);
+});
+
+test('완전히 지우면 고객도 방문 기록도 사라진다', () => {
+  const { state: s0, id } = oneWithVisit();
+  const { state: gone } = deleteCustomer(s0, id, '2026-09-11T20:00:00');
+  const { state } = purgeCustomer(gone, id);
+  assert.deepEqual(state.customers, []);
+  assert.deepEqual(state.visits, [], '그 고객의 방문 기록도 함께 사라진다');
+  assert.deepEqual(deletedCustomers(state), []);
+  assert.deepEqual(state.today.customerIds, []);
+});
+
+test('완전히 지워도 다른 고객의 방문 기록은 건드리지 않는다', () => {
+  let { state, customer: a } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  let b;
+  ({ state, customer: b } = addCustomer(state, { name: '이OO', phone: '01033334444' }));
+  ({ state } = addVisit(state, a.id, { done: 'A 시술' }, '2026-09-11T10:00:00'));
+  ({ state } = addVisit(state, b.id, { done: 'B 시술' }, '2026-09-11T11:00:00'));
+  ({ state } = purgeCustomer(state, a.id));
+  assert.deepEqual(state.customers.map(c => c.name), ['이OO']);
+  assert.deepEqual(state.visits.map(v => v.done), ['B 시술']);
+});
+
+test('저장했다 꺼내도 지운 상태가 그대로 유지된다', () => {
+  const { state: s0, id } = oneWithVisit();
+  const { state } = deleteCustomer(s0, id, '2026-09-11T20:00:00');
+  const restored = deserialize(serialize(state));
+  assert.deepEqual(restored, state);
+  assert.deepEqual(findCustomers(restored, ''), []);
+});
+
+test('지우기 칸이 없던 옛 백업을 불러오면 모두 살아 있는 고객이 된다', () => {
+  const old = JSON.stringify({ nextId: 2, customers: [{ id: 1, name: '김OO', last4: '1234' }], memos: [], today: { date: '', customerIds: [] } });
+  const state = deserialize(old);
+  assert.equal(state.customers[0].deletedAt, null);
+  assert.deepEqual(findCustomers(state, '').map(c => c.name), ['김OO']);
 });

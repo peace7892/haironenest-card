@@ -18,11 +18,18 @@ const Store = (() => {
     return d;
   }
 
+  // 지운 고객(deletedAt)은 목록·검색·번호 중복 검사에서 모두 빠진다.
+  // 그래야 지운 고객과 같은 번호로 새 고객을 만들 수 있다.
+  const activeCustomers = (state) => state.customers.filter(c => !c.deletedAt);
+
+  function phoneClash(state, phone, exceptId) {
+    if (!phone) return null;
+    return activeCustomers(state).find(c => c.phone === phone && c.id !== exceptId) ?? null;
+  }
+
   function assertPhoneFree(state, phone, exceptId) {
-    if (phone && state.customers.some(c => c.phone === phone && c.id !== exceptId)) {
-      const dup = state.customers.find(c => c.phone === phone && c.id !== exceptId);
-      throw new Error(`이미 같은 번호의 고객이 있습니다: ${dup.name}`);
-    }
+    const dup = phoneClash(state, phone, exceptId);
+    if (dup) throw new Error(`이미 같은 번호의 고객이 있습니다: ${dup.name}`);
   }
 
   function addCustomer(state, { name, phone, referrer }) {
@@ -30,7 +37,7 @@ const Store = (() => {
     if (!trimmed) throw new Error('이름을 입력하세요');
     const clean = cleanPhone(phone);
     assertPhoneFree(state, clean);
-    const customer = { id: state.nextId, name: trimmed, phone: clean, referrer: (referrer ?? '').trim(), profile: emptyProfile(), profileHistory: [] };
+    const customer = { id: state.nextId, name: trimmed, phone: clean, referrer: (referrer ?? '').trim(), profile: emptyProfile(), profileHistory: [], deletedAt: null };
     return {
       state: { ...state, nextId: state.nextId + 1, customers: [...state.customers, customer] },
       customer,
@@ -61,15 +68,71 @@ const Store = (() => {
 
   function findCustomers(state, query) {
     const q = (query ?? '').trim();
-    if (!q) return state.customers;
+    const live = activeCustomers(state);
+    if (!q) return live;
     const qd = digitsOnly(q);
-    return state.customers.filter(c => c.name.includes(q) || (qd && c.phone && c.phone.includes(qd)));
+    return live.filter(c => c.name.includes(q) || (qd && c.phone && c.phone.includes(qd)));
   }
 
-  function requireCustomer(state, customerId) {
+  function findAny(state, customerId) {
     const c = state.customers.find(x => x.id === customerId);
     if (!c) throw new Error('고객을 찾을 수 없습니다');
     return c;
+  }
+
+  // 고치기·방문 기록처럼 살아 있는 고객에게만 해야 하는 일은 이걸 쓴다.
+  function requireCustomer(state, customerId) {
+    const c = findAny(state, customerId);
+    if (c.deletedAt) throw new Error('지운 고객입니다. 먼저 되살리세요');
+    return c;
+  }
+
+  // ---- 지우기 -------------------------------------------------------------
+  // 두 단계로 나눈다. deleteCustomer는 목록에서 감추기만 해서 되살릴 수 있고,
+  // purgeCustomer는 고객과 그 방문 기록을 정말로 없애 되살릴 수 없다.
+
+  function deleteCustomer(state, customerId, now) {
+    const c = requireCustomer(state, customerId);
+    const updated = { ...c, deletedAt: now };
+    return {
+      state: {
+        ...state,
+        customers: state.customers.map(x => (x.id === customerId ? updated : x)),
+        today: { ...state.today, customerIds: state.today.customerIds.filter(id => id !== customerId) },
+      },
+      customer: updated,
+    };
+  }
+
+  function restoreCustomer(state, customerId) {
+    const c = findAny(state, customerId);
+    if (!c.deletedAt) return { state, customer: c };
+    const clash = phoneClash(state, c.phone, customerId);
+    if (clash) throw new Error(`같은 번호를 쓰는 고객(${clash.name})이 있어 되살릴 수 없습니다`);
+    const updated = { ...c, deletedAt: null };
+    return {
+      state: { ...state, customers: state.customers.map(x => (x.id === customerId ? updated : x)) },
+      customer: updated,
+    };
+  }
+
+  function purgeCustomer(state, customerId) {
+    findAny(state, customerId);
+    return {
+      state: {
+        ...state,
+        customers: state.customers.filter(x => x.id !== customerId),
+        visits: state.visits.filter(v => v.customerId !== customerId),
+        today: { ...state.today, customerIds: state.today.customerIds.filter(id => id !== customerId) },
+      },
+    };
+  }
+
+  // 지운 고객 목록. 최근에 지운 것이 위로 온다.
+  function deletedCustomers(state) {
+    return state.customers
+      .filter(c => c.deletedAt)
+      .sort((a, b) => (a.deletedAt < b.deletedAt ? 1 : a.deletedAt > b.deletedAt ? -1 : b.id - a.id));
   }
 
   // 고정 정보(고객이 한 말·생활·직업 / 얼굴형·모질·두상). 고치면 이전 내용이 이력에 남는다.
@@ -131,7 +194,8 @@ const Store = (() => {
 
   function todayList(state, date) {
     if (state.today.date !== date) return [];
-    return state.today.customerIds.map(id => {
+    const live = (id) => { const c = state.customers.find(x => x.id === id); return c && !c.deletedAt; };
+    return state.today.customerIds.filter(live).map(id => {
       const customer = state.customers.find(c => c.id === id);
       const visits = visitsOf(state, id);
       const todays = visits.filter(v => v.createdAt.startsWith(date));
@@ -157,7 +221,7 @@ const Store = (() => {
   // 이전 버전(자유 메모 한 칸: memos[].text)을 방문 기록(visits[].done)으로 옮긴다.
   function migrate(p) {
     const customers = p.customers.map(({ last4, ...c }) => ({
-      ...c, phone: c.phone ?? last4 ?? '', referrer: c.referrer ?? '', profile: c.profile ?? emptyProfile(), profileHistory: c.profileHistory ?? [],
+      ...c, phone: c.phone ?? last4 ?? '', referrer: c.referrer ?? '', profile: c.profile ?? emptyProfile(), profileHistory: c.profileHistory ?? [], deletedAt: c.deletedAt ?? null,
     }));
     const fromMemos = (p.memos ?? []).map(m => ({
       id: m.id, customerId: m.customerId, done: m.text, next: '', createdAt: m.createdAt,
@@ -168,7 +232,7 @@ const Store = (() => {
     return { nextId: p.nextId ?? 1, customers, visits, today };
   }
 
-  return { createState, addCustomer, editCustomer, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize };
+  return { createState, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;
