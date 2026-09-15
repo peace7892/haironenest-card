@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -383,4 +383,97 @@ test('오늘 명단도 저장했다 꺼내면 그대로다', () => {
   ({ state } = markToday(state, kim, D, '10:00'));
   ({ state } = markToday(state, lee, D, ''));
   assert.deepEqual(deserialize(serialize(state)), state);
+});
+
+// ---- 예약 시간 후보 --------------------------------------------------------
+
+test('예약 시간 후보는 10시부터 30분 간격으로 19시까지 19개다', () => {
+  const slots = timeSlots();
+  assert.equal(slots.length, 19);
+  assert.equal(slots[0], '10:00');
+  assert.equal(slots[1], '10:30');
+  assert.equal(slots[slots.length - 1], '19:00');
+  assert.equal(slots.includes('12:30'), true);
+  assert.equal(slots.includes('09:30'), false, '영업 전 시간은 없다');
+  assert.equal(slots.includes('19:30'), false, '마지막 예약 뒤 시간은 없다');
+});
+
+// ---- 방문 주기 -------------------------------------------------------------
+
+// 준 날짜들에 방문 기록을 남긴 고객 하나를 만든다.
+function visitedOn(...dates) {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  for (const d of dates) ({ state } = addVisit(state, customer.id, { done: `${d} 시술` }, `${d}T14:00:00`));
+  return { state, id: customer.id };
+}
+
+test('방문 기록마다 이전 방문에서 며칠 만인지 붙는다. 첫 방문은 비어 있다', () => {
+  const { state, id } = visitedOn('2026-05-01', '2026-06-26', '2026-09-04');
+  const got = visitsWithGaps(state, id);
+  assert.deepEqual(got.map(v => v.createdAt.slice(0, 10)), ['2026-09-04', '2026-06-26', '2026-05-01'], '최신순 그대로');
+  assert.deepEqual(got.map(v => v.sincePrev), [70, 56, null]);
+});
+
+test('오늘 기준으로 마지막 방문이 며칠 전인지, 보통 며칠 만에 오는지 알려준다', () => {
+  const { state, id } = visitedOn('2026-05-01', '2026-06-26', '2026-09-04');
+  const c = visitCycle(state, id, '2026-09-15');
+  assert.equal(c.count, 3);
+  assert.equal(c.lastDate, '2026-09-04');
+  assert.equal(c.sinceLast, 11);
+  assert.equal(c.average, 63, '56일과 70일의 평균');
+});
+
+test('오늘 기록을 남겨도 마지막 방문은 지난번을 가리킨다', () => {
+  let { state, id } = visitedOn('2026-06-26', '2026-09-04');
+  const before = visitCycle(state, id, '2026-09-15');
+  ({ state } = addVisit(state, id, { done: '오늘 시술' }, '2026-09-15T11:00:00'));
+  const after = visitCycle(state, id, '2026-09-15');
+  assert.equal(after.lastDate, before.lastDate, '오늘 적었다고 마지막 방문 날짜가 오늘로 바뀌지 않는다');
+  assert.equal(after.sinceLast, 11, '며칠 만에 왔는지도 그대로');
+  assert.equal(after.count, 3, '방문 건수는 늘어난다');
+});
+
+test('처음 오는 고객은 며칠 만인지도 평균도 없다', () => {
+  let { state, customer } = addCustomer(createState(), { name: '새손님', phone: '01099998888' });
+  const c = visitCycle(state, customer.id, '2026-09-15');
+  assert.equal(c.count, 0);
+  assert.equal(c.sinceLast, null);
+  assert.equal(c.average, null);
+  assert.equal(c.lastDate, '');
+  assert.deepEqual(visitsWithGaps(state, customer.id), []);
+});
+
+test('방문이 한 번뿐이면 며칠 만인지는 나오고 평균은 아직 없다', () => {
+  const { state, id } = visitedOn('2026-08-01');
+  const c = visitCycle(state, id, '2026-09-15');
+  assert.equal(c.sinceLast, 45);
+  assert.equal(c.average, null, '사이가 하나도 없으면 평균을 내지 않는다');
+});
+
+test('달을 넘고 해를 넘어도 날짜를 제대로 센다', () => {
+  const { state, id } = visitedOn('2025-12-24');
+  assert.equal(visitCycle(state, id, '2026-01-07').sinceLast, 14, '해를 넘는 2주');
+  const feb = visitedOn('2024-02-27');
+  assert.equal(visitCycle(feb.state, feb.id, '2024-03-01').sinceLast, 3, '윤년 2월 29일을 센다');
+});
+
+test('같은 날 두 번 오면 사이는 0일이다', () => {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  ({ state } = addVisit(state, customer.id, { done: '아침 컷' }, '2026-09-04T10:00:00'));
+  ({ state } = addVisit(state, customer.id, { done: '저녁 손질' }, '2026-09-04T18:00:00'));
+  assert.deepEqual(visitsWithGaps(state, customer.id).map(v => v.sincePrev), [0, null]);
+});
+
+test('오늘 명단 줄에도 며칠 만인지와 평균이 함께 온다', () => {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  ({ state } = addVisit(state, customer.id, { done: '5월', next: '다음엔 볼륨펌' }, '2026-05-01T14:00:00'));
+  ({ state } = addVisit(state, customer.id, { done: '6월', next: '' }, '2026-06-26T14:00:00'));
+  ({ state } = markToday(state, customer.id, '2026-09-15', '10:30'));
+  const row = todayList(state, '2026-09-15')[0];
+  assert.equal(row.at, '10:30');
+  assert.equal(row.sinceLast, 81);
+  assert.equal(row.lastDate, '2026-06-26');
+  assert.equal(row.average, 56);
+  assert.equal(row.count, 2);
+  assert.equal(row.recorded, false);
 });

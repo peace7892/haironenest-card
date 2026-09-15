@@ -183,12 +183,53 @@ const Store = (() => {
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.id - a.id));
   }
 
+  // ---- 방문 주기 ----------------------------------------------------------
+  // 날짜만 보고 센다. 같은 날 두 번 와도 0일, 시각은 따지지 않는다.
+
+  const dayNumber = (iso) => {
+    const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+    return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+  };
+  const daysBetween = (from, to) => dayNumber(to) - dayNumber(from);
+
+  // 최신순 방문 기록에 '이전 방문에서 며칠 만'(sincePrev)을 붙인다. 맨 처음 방문은 null.
+  function visitsWithGaps(state, customerId) {
+    const desc = visitsOf(state, customerId);
+    return desc.map((v, i) => ({ ...v, sincePrev: desc[i + 1] ? daysBetween(desc[i + 1].createdAt, v.createdAt) : null }));
+  }
+
+  // date(오늘) 기준 한 줄 요약.
+  // lastDate·sinceLast는 오늘 것을 뺀 '지난번'을 가리켜서, 오늘 기록을 남겨도 값이 흔들리지 않는다.
+  function visitCycle(state, customerId, date) {
+    const desc = visitsOf(state, customerId);
+    const before = desc.filter(v => v.createdAt.slice(0, 10) < date);
+    const gaps = [];
+    for (let i = 0; i < desc.length - 1; i++) gaps.push(daysBetween(desc[i + 1].createdAt, desc[i].createdAt));
+    return {
+      count: desc.length,
+      lastDate: before.length ? before[0].createdAt.slice(0, 10) : '',
+      sinceLast: before.length ? daysBetween(before[0].createdAt, date) : null,
+      average: gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : null,
+    };
+  }
+
   // ---- 오늘 명단 ----------------------------------------------------------
 
   // 명단 한 줄은 { customerId, at }. at은 'HH:MM'이거나 ''(시간 안 정함).
   // 시간을 적은 사람이 시간순으로 앞에 오고, 안 적은 사람은 올린 순서대로 뒤에 붙는다.
 
   const pad2 = (n) => String(n).padStart(2, '0');
+
+  // 예약 시간 후보. 영업시간이 바뀌면 이 세 줄만 고치면 명단의 고르는 칸이 따라 바뀐다.
+  const OPEN_MIN = 10 * 60;   // 오전 10시부터
+  const CLOSE_MIN = 19 * 60;  // 마지막 예약 19시
+  const STEP_MIN = 30;        // 30분 간격
+
+  function timeSlots() {
+    const out = [];
+    for (let m = OPEN_MIN; m <= CLOSE_MIN; m += STEP_MIN) out.push(`${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`);
+    return out;
+  }
 
   // '10:00' '9:30' '930' '1030' '10' 을 모두 받아 'HH:MM'으로 맞춘다. 빈 값은 빈 값 그대로.
   function cleanTime(at) {
@@ -250,7 +291,8 @@ const Store = (() => {
       const visits = visitsOf(state, e.customerId);
       const todays = visits.filter(v => v.createdAt.startsWith(date));
       const previous = visits.find(v => !v.createdAt.startsWith(date));
-      return { order: idx + 1, at: e.at, customer, recorded: todays.length > 0, lastNext: previous ? previous.next : '' };
+      const cycle = visitCycle(state, e.customerId, date);
+      return { order: idx + 1, at: e.at, customer, recorded: todays.length > 0, lastNext: previous ? previous.next : '', ...cycle };
     });
   }
 
@@ -294,7 +336,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { createState, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

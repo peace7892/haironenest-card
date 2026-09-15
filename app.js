@@ -40,6 +40,21 @@
       </li>`).join('');
   }
 
+  // 예약 시간 고르는 칸. 영업시간 밖 시간이 이미 적혀 있으면(옛 기록) 그 시간도 후보에 끼워 준다.
+  function timeOptions(selected) {
+    const slots = Store.timeSlots();
+    const all = slots.includes(selected) || !selected ? slots : [...slots, selected].sort();
+    return `<option value="">시간 없음</option>` +
+      all.map((t) => `<option value="${t}"${t === selected ? ' selected' : ''}>${t}</option>`).join('');
+  }
+
+  // 며칠 만의 방문인지 한 줄로. 아직 온 적이 없으면 '첫 방문'.
+  function cycleText(cy) {
+    if (cy.sinceLast === null) return '첫 방문';
+    const last = cy.lastDate.replace(/-/g, '.');
+    return `<b>${cy.sinceLast}일 만</b> · 지난 방문 ${last}${cy.average ? ` · 보통 ${cy.average}일마다` : ''}`;
+  }
+
   // ---- 왼쪽 아래: 지운 고객 (되살리기 / 완전히 지우기) ----------------------
   function renderTrash() {
     const box = $('#trash');
@@ -72,10 +87,13 @@
       : list.map((t) => `
         <div class="today-item" data-open="${t.customer.id}">
           <div class="no">${t.order}</div>
-          <div class="when"><input type="text" class="at" inputmode="numeric" data-at="${t.customer.id}" value="${esc(t.at)}" placeholder="--:--" title="예약 시간. 1400처럼 치면 14:00이 됩니다"></div>
-          <div class="name">${esc(t.customer.name)} <small style="color:var(--muted);font-weight:normal">${esc(Store.maskPhone(t.customer.phone))}</small></div>
-          <div class="sub">${esc([t.customer.profile.hair, t.customer.profile.talk].filter(Boolean).join(' · ')) || '<i>고정 정보 없음</i>'}</div>
-          <div class="sub">${t.lastNext ? '지난번 다음 방향: ' + esc(t.lastNext) : '지난 방문 기록 없음'}</div>
+          <div class="when"><select class="at" data-at="${t.customer.id}" title="예약 시간">${timeOptions(t.at)}</select></div>
+          <div class="who">
+            <div class="name">${esc(t.customer.name)} <small style="color:var(--muted);font-weight:normal">${esc(Store.maskPhone(t.customer.phone))}</small></div>
+            <div class="cycle">${cycleText(t)}</div>
+            <div class="sub">${esc([t.customer.profile.hair, t.customer.profile.talk].filter(Boolean).join(' · ')) || '<i>고정 정보 없음</i>'}</div>
+            ${t.lastNext ? `<div class="sub">지난번 다음 방향: ${esc(t.lastNext)}</div>` : ''}
+          </div>
           <div class="right">
             <span class="status ${t.recorded ? 'done' : 'todo'}">${t.recorded ? '기록 남김' : '아직 안 적음'}</span>
             <button type="button" class="link small" data-drop="${t.customer.id}">명단에서 빼기</button>
@@ -85,7 +103,7 @@
       <h2 class="card-title">오늘 <small>${today().replace(/-/g, '.')} · ${list.length}명 중 ${done}명 기록 남김</small></h2>
       <div class="add-today">
         <div class="row">
-          <input type="text" class="at" id="add-at" inputmode="numeric" placeholder="10:00" autocomplete="off" title="예약 시간. 1400처럼 치면 14:00이 됩니다. 비워도 됩니다">
+          <select class="at" id="add-at" title="예약 시간 (안 골라도 됩니다)">${timeOptions('')}</select>
           <input type="text" id="add-name" placeholder="이름이나 전화번호를 치면 아래에 뜹니다" autocomplete="off">
         </div>
         <div id="add-hits"></div>
@@ -129,10 +147,11 @@
 
   // ---- 오른쪽: 고객 카드 ---------------------------------------------------
   function renderCard(c) {
-    const visits = Store.visitsOf(state, c.id);
+    const visits = Store.visitsWithGaps(state, c.id);
     const latestNext = visits.find((v) => v.next)?.next;
     return `
       ${renderIdentity(c, visits.length)}
+      <div class="cycle big">${cycleText(Store.visitCycle(state, c.id, today()))}</div>
       ${renderProfile(c)}
       ${latestNext ? `<div class="next-big"><b>지난번에 다음에 하기로 한 것</b><p>${esc(latestNext)}</p></div>` : ''}
       <form id="visit-form">
@@ -217,7 +236,7 @@
       </details>`;
     return `
       <div class="visit">
-        <div class="meta"><span>${fmt(v.createdAt)}</span><button type="button" class="link" data-action="edit" data-id="${v.id}">고치기</button></div>
+        <div class="meta"><span>${fmt(v.createdAt)}${v.sincePrev === null ? ' · 첫 방문' : ` · 이전 방문에서 ${v.sincePrev}일 만`}</span><button type="button" class="link" data-action="edit" data-id="${v.id}">고치기</button></div>
         <div class="field"><b>시술 내용과 이유</b><p>${esc(v.done)}</p></div>
         ${v.next ? `<div class="field"><b>다음 방향</b><p>${esc(v.next)}</p></div>` : ''}
         ${history}
@@ -257,7 +276,7 @@
 
   $('#card').addEventListener('click', (e) => {
     // 시간 칸을 누른 것뿐인데 카드가 열려버리면 안 된다
-    if (e.target.closest('input, textarea')) return;
+    if (e.target.closest('input, textarea, select')) return;
 
     const drop = e.target.closest('button[data-drop]');
     if (drop) { commit(Store.unmarkToday(state, Number(drop.dataset.drop), today()).state); render(); return; }
@@ -342,7 +361,7 @@
 
   // 명단에 올린 뒤 시간을 고치면 줄 순서도 따라 바뀐다
   $('#card').addEventListener('change', (e) => {
-    const at = e.target.closest('input[data-at]');
+    const at = e.target.closest('[data-at]');
     if (!at) return;
     const id = Number(at.dataset.at);
     try {
