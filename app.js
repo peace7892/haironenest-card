@@ -49,6 +49,12 @@
       all.map((t) => `<option value="${t}"${t === selected ? ' selected' : ''}>${t}</option>`).join('');
   }
 
+  // 지운 기록이 저절로 없어지기까지 남은 날.
+  function leftText(left) {
+    if (left === null) return '';
+    return left === 0 ? '오늘 사라짐' : `${left}일 뒤 사라짐`;
+  }
+
   // 며칠 만의 방문인지 한 줄로. 아직 온 적이 없으면 '첫 방문'.
   function cycleText(cy) {
     if (cy.sinceLast === null) return '첫 방문';
@@ -174,10 +180,10 @@
     return `
       <details class="trash" ${visitTrashOpen ? 'open' : ''}>
         <summary>지운 기록 ${gone.length}건</summary>
-        <p class="note">되살리면 방문 목록과 주기 계산에 다시 들어갑니다.</p>
+        <p class="note">지운 지 일주일이 지나면 저절로 없어집니다. 되살리면 방문 목록과 주기 계산에 다시 들어갑니다.</p>
         ${gone.map((v) => `
           <div class="visit">
-            <div class="meta"><span>${fmt(v.createdAt)}</span>
+            <div class="meta"><span>${fmt(v.createdAt)} · <b class="left">${leftText(Store.daysLeftInTrash(v, now()))}</b></span>
               <span class="acts">
                 <button type="button" class="small secondary" data-action="restore-visit" data-id="${v.id}">되살리기</button>
                 <button type="button" class="small danger" data-action="purge-visit" data-id="${v.id}">완전히 지우기</button>
@@ -451,11 +457,15 @@
     const loaded = Store.deserialize(text);
     if (loaded.customers.length === 0 && state.customers.length > 0 && !confirm('불러올 파일에 고객이 없습니다. 지금 기록을 비우고 이 파일로 바꿀까요?')) { e.target.value = ''; return; }
     if (state.customers.length > 0 && !confirm(`지금 기록(고객 ${state.customers.length}명)을 이 파일의 내용(고객 ${loaded.customers.length}명)으로 바꿉니다. 계속할까요?`)) { e.target.value = ''; return; }
-    commit(loaded);
+    commit(Store.sweepDeletedVisits(loaded, now()).state);
     view = { kind: 'today' };
     render();
     e.target.value = '';
   });
+
+  // 앱을 열 때 한 번: 지운 지 일주일이 지난 방문 기록을 치운다.
+  const swept = Store.sweepDeletedVisits(state, now());
+  if (swept.removed > 0) commit(swept.state);
 
   render();
 })();

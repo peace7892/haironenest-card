@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -573,4 +573,98 @@ test('지움 칸이 없던 옛 백업의 방문 기록은 모두 살아 있는 �
   const state = deserialize(old);
   assert.equal(state.visits[0].deletedAt, null);
   assert.equal(visitsOf(state, 1).length, 1);
+});
+
+// ---- 지운 기록이 일주일 뒤 저절로 사라진다 ---------------------------------
+
+// 지운 지 days일 지난 방문 기록 하나를 가진 상태를 만든다.
+function trashedDaysAgo(days) {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  let v;
+  ({ state, visit: v } = addVisit(state, customer.id, { done: '두 번 적은 기록' }, '2026-09-15T17:31:00'));
+  ({ state } = addVisit(state, customer.id, { done: '남겨둘 기록' }, '2026-09-15T15:26:00'));
+  ({ state } = deleteVisit(state, v.id, '2026-09-15T17:40:00'));
+  const [y, m, d] = [2026, 9, 15 + days];
+  const now = new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10) + 'T09:00:00';
+  return { state, id: customer.id, visitId: v.id, now };
+}
+
+test('지운 지 엿새까지는 남아 있다', () => {
+  for (const days of [0, 1, 6]) {
+    const { state, id, now } = trashedDaysAgo(days);
+    const { state: after, removed } = sweepDeletedVisits(state, now);
+    assert.equal(removed, 0, `${days}일째에는 안 없앤다`);
+    assert.equal(deletedVisitsOf(after, id).length, 1);
+  }
+});
+
+test('이레째부터는 저절로 없어진다', () => {
+  for (const days of [7, 8, 30]) {
+    const { state, id, now } = trashedDaysAgo(days);
+    const { state: after, removed } = sweepDeletedVisits(state, now);
+    assert.equal(removed, 1, `${days}일째에는 없앤다`);
+    assert.deepEqual(deletedVisitsOf(after, id), []);
+    assert.equal(visitsOf(after, id).length, 1, '안 지운 기록은 그대로 남는다');
+  }
+});
+
+test('지우지 않은 기록은 아무리 오래돼도 안 건드린다', () => {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  ({ state } = addVisit(state, customer.id, { done: '5년 전 시술' }, '2021-05-01T14:00:00'));
+  const { state: after, removed } = sweepDeletedVisits(state, '2026-09-15T09:00:00');
+  assert.equal(removed, 0);
+  assert.equal(visitsOf(after, customer.id).length, 1);
+});
+
+test('되살린 기록은 저절로 사라지지 않는다', () => {
+  let { state, id, visitId, now } = trashedDaysAgo(30);
+  ({ state } = restoreVisit(state, visitId));
+  const { state: after, removed } = sweepDeletedVisits(state, now);
+  assert.equal(removed, 0, '되살렸으니 없애지 않는다');
+  assert.equal(visitsOf(after, id).length, 2);
+});
+
+test('사라지기까지 며칠 남았는지 알려준다', () => {
+  const cases = [[0, 7], [1, 6], [6, 1], [7, 0], [20, 0]];
+  for (const [days, left] of cases) {
+    const { state, id, now } = trashedDaysAgo(days);
+    assert.equal(daysLeftInTrash(deletedVisitsOf(state, id)[0], now), left, `${days}일째에는 ${left}일 남음`);
+  }
+});
+
+test('안 지운 기록에는 남은 날이 없다', () => {
+  const { state, id } = trashedDaysAgo(0);
+  assert.equal(daysLeftInTrash(visitsOf(state, id)[0], '2026-09-15T09:00:00'), null);
+  assert.equal(daysLeftInTrash(null, '2026-09-15T09:00:00'), null);
+});
+
+test('여러 건이 섞여 있어도 기한이 지난 것만 골라 없앤다', () => {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  const mk = (done, at) => { let v; ({ state, visit: v } = addVisit(state, customer.id, { done }, at)); return v.id; };
+  const old1 = mk('열흘 전에 지움', '2026-08-01T10:00:00');
+  const old2 = mk('여드레 전에 지움', '2026-08-02T10:00:00');
+  const fresh = mk('어제 지움', '2026-08-03T10:00:00');
+  mk('안 지운 것', '2026-08-04T10:00:00');
+  ({ state } = deleteVisit(state, old1, '2026-09-05T10:00:00'));
+  ({ state } = deleteVisit(state, old2, '2026-09-07T10:00:00'));
+  ({ state } = deleteVisit(state, fresh, '2026-09-14T10:00:00'));
+
+  const { state: after, removed } = sweepDeletedVisits(state, '2026-09-15T09:00:00');
+  assert.equal(removed, 2);
+  assert.deepEqual(deletedVisitsOf(after, customer.id).map(v => v.id), [fresh], '어제 지운 것만 남는다');
+  assert.equal(visitsOf(after, customer.id).length, 1);
+});
+
+test('저절로 없어진 뒤에도 주기 계산은 멀쩡하다', () => {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  ({ state } = addVisit(state, customer.id, { done: '5월' }, '2026-05-01T14:00:00'));
+  ({ state } = addVisit(state, customer.id, { done: '9월' }, '2026-09-04T14:00:00'));
+  let dup;
+  ({ state, visit: dup } = addVisit(state, customer.id, { done: '9월 또 적음' }, '2026-09-04T17:00:00'));
+  ({ state } = deleteVisit(state, dup.id, '2026-09-04T18:00:00'));
+  const { state: after } = sweepDeletedVisits(state, '2026-09-15T09:00:00');
+  const c = visitCycle(after, customer.id, '2026-09-15');
+  assert.equal(c.count, 2);
+  assert.equal(c.average, 126);
+  assert.equal(c.sinceLast, 11);
 });

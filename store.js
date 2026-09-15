@@ -226,6 +226,24 @@ const Store = (() => {
       .sort((a, b) => (a.deletedAt < b.deletedAt ? 1 : a.deletedAt > b.deletedAt ? -1 : b.id - a.id));
   }
 
+  // 지운 기록을 보관하는 기간. 이 날수가 지나면 저절로 없어진다. 바꾸려면 이 한 줄만 고친다.
+  const TRASH_DAYS = 7;
+
+  // 지운 지 TRASH_DAYS가 지난 방문 기록을 없앤다. 앱을 열 때 한 번 돈다.
+  // 지운 고객은 건드리지 않는다. 고객 하나에는 몇 해치 기록이 딸려 있어서
+  // 저절로 없애기에는 무게가 다르다.
+  function sweepDeletedVisits(state, now) {
+    const kept = state.visits.filter(v => !v.deletedAt || daysBetween(v.deletedAt, now) < TRASH_DAYS);
+    const removed = state.visits.length - kept.length;
+    return removed === 0 ? { state, removed: 0 } : { state: { ...state, visits: kept }, removed };
+  }
+
+  // 저절로 사라지기까지 남은 날. 지운 기록이 아니면 null.
+  function daysLeftInTrash(visit, now) {
+    if (!visit || !visit.deletedAt) return null;
+    return Math.max(0, TRASH_DAYS - daysBetween(visit.deletedAt, now));
+  }
+
   // ---- 방문 주기 ----------------------------------------------------------
   // 날짜만 보고 센다. 같은 날 두 번 와도 0일, 시각은 따지지 않는다.
 
@@ -379,7 +397,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;
