@@ -7,6 +7,7 @@
   let editingProfile = false;
   let editingIdentity = false;
   let trashOpen = false;
+  let visitTrashOpen = false;
 
   const $ = (sel) => document.querySelector(sel);
   const pad = (n) => String(n).padStart(2, '0');
@@ -162,7 +163,29 @@
         <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
       </form>
       <h3>지난 방문</h3>
-      ${visits.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : visits.map(renderVisit).join('')}`;
+      ${visits.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : visits.map(renderVisit).join('')}
+      ${renderDeletedVisits(c)}`;
+  }
+
+  // 실수로 두 번 적은 기록을 치우는 자리. 지운 게 없으면 아예 안 보인다.
+  function renderDeletedVisits(c) {
+    const gone = Store.deletedVisitsOf(state, c.id);
+    if (gone.length === 0) return '';
+    return `
+      <details class="trash" ${visitTrashOpen ? 'open' : ''}>
+        <summary>지운 기록 ${gone.length}건</summary>
+        <p class="note">되살리면 방문 목록과 주기 계산에 다시 들어갑니다.</p>
+        ${gone.map((v) => `
+          <div class="visit">
+            <div class="meta"><span>${fmt(v.createdAt)}</span>
+              <span class="acts">
+                <button type="button" class="small secondary" data-action="restore-visit" data-id="${v.id}">되살리기</button>
+                <button type="button" class="small danger" data-action="purge-visit" data-id="${v.id}">완전히 지우기</button>
+              </span></div>
+            <div class="field"><p>${esc(v.done)}</p></div>
+          </div>`).join('')}
+        <div class="msg" id="visit-trash-msg"></div>
+      </details>`;
   }
 
   const fmtPhone = (p) => (p.length === 11 ? `${p.slice(0, 3)}-${p.slice(3, 7)}-${p.slice(7)}` : p.length === 10 ? `${p.slice(0, 3)}-${p.slice(3, 6)}-${p.slice(6)}` : p);
@@ -236,7 +259,11 @@
       </details>`;
     return `
       <div class="visit">
-        <div class="meta"><span>${fmt(v.createdAt)}${v.sincePrev === null ? ' · 첫 방문' : ` · 이전 방문에서 ${v.sincePrev}일 만`}</span><button type="button" class="link" data-action="edit" data-id="${v.id}">고치기</button></div>
+        <div class="meta"><span>${fmt(v.createdAt)}${v.sincePrev === null ? ' · 첫 방문' : ` · 이전 방문에서 ${v.sincePrev}일 만`}</span>
+          <span class="acts">
+            <button type="button" class="link" data-action="edit" data-id="${v.id}">고치기</button>
+            <button type="button" class="link danger" data-action="del-visit" data-id="${v.id}">지우기</button>
+          </span></div>
         <div class="field"><b>시술 내용과 이유</b><p>${esc(v.done)}</p></div>
         ${v.next ? `<div class="field"><b>다음 방향</b><p>${esc(v.next)}</p></div>` : ''}
         ${history}
@@ -310,13 +337,32 @@
         commit(Store.setProfile(state, view.id, { talk: $('#profile-talk').value, hair: $('#profile-hair').value }, now()).state);
         editingProfile = false; render();
       }
+      else if (a === 'del-visit') {
+        const v = Store.visitsOf(state, view.id).find((x) => x.id === Number(btn.dataset.id));
+        const head = v.done.length > 40 ? v.done.slice(0, 40) + '…' : v.done;
+        if (!confirm(`${fmt(v.createdAt)} 방문 기록을 지웁니다.\n\n${head}\n\n[지난 방문] 아래 [지운 기록]에서 되살릴 수 있습니다.\n\n지울까요?`)) return;
+        commit(Store.deleteVisit(state, v.id, now()).state);
+        visitTrashOpen = true; editingVisitId = null; render();
+      }
+      else if (a === 'restore-visit') {
+        commit(Store.restoreVisit(state, Number(btn.dataset.id)).state);
+        visitTrashOpen = true; render();
+      }
+      else if (a === 'purge-visit') {
+        const v = Store.deletedVisitsOf(state, view.id).find((x) => x.id === Number(btn.dataset.id));
+        const head = v.done.length > 40 ? v.done.slice(0, 40) + '…' : v.done;
+        if (!confirm(`${fmt(v.createdAt)} 기록을 완전히 지웁니다.\n\n${head}\n\n이건 되돌릴 수 없습니다.\n\n계속할까요?`)) return;
+        if (!confirm('마지막 확인입니다.\n\n이 기록이 영영 사라집니다.')) return;
+        commit(Store.purgeVisit(state, v.id).state);
+        visitTrashOpen = true; render();
+      }
       else if (a === 'edit') { editingVisitId = Number(btn.dataset.id); render(); $('#edit-done').focus(); }
       else if (a === 'cancel-edit') { editingVisitId = null; render(); }
       else if (a === 'save-edit') {
         commit(Store.editVisit(state, Number(btn.dataset.id), { done: $('#edit-done').value, next: $('#edit-next').value }, now()).state);
         editingVisitId = null; render();
       }
-    } catch (err) { showMsg($('#identity-msg') || $('#edit-msg') || $('#profile-msg'), err.message, 'error'); }
+    } catch (err) { showMsg($('#identity-msg') || $('#edit-msg') || $('#profile-msg') || $('#visit-trash-msg'), err.message, 'error'); }
   });
 
   $('#trash').addEventListener('click', (e) => {
@@ -345,6 +391,10 @@
       if (view.kind === 'card' && view.id === id) view = { kind: 'today' };
       render();
     }
+  });
+
+  $('#card').addEventListener('click', (e) => {
+    if (e.target.closest('details.trash summary')) visitTrashOpen = !visitTrashOpen;
   });
 
   $('#card').addEventListener('input', (e) => {

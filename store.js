@@ -159,7 +159,7 @@ const Store = (() => {
 
   function addVisit(state, customerId, fields, now) {
     requireCustomer(state, customerId);
-    const visit = { id: state.nextId, customerId, ...visitFields(fields), createdAt: now, history: [] };
+    const visit = { id: state.nextId, customerId, ...visitFields(fields), createdAt: now, history: [], deletedAt: null };
     return {
       state: { ...state, nextId: state.nextId + 1, visits: [...state.visits, visit] },
       visit,
@@ -170,6 +170,7 @@ const Store = (() => {
     const clean = visitFields(fields);
     const target = state.visits.find(v => v.id === visitId);
     if (!target) throw new Error('방문 기록을 찾을 수 없습니다');
+    if (target.deletedAt) throw new Error('지운 기록입니다. 먼저 되살리세요');
     const updated = { ...target, ...clean, history: [...target.history, { done: target.done, next: target.next, replacedAt: now }] };
     return {
       state: { ...state, visits: state.visits.map(v => (v.id === visitId ? updated : v)) },
@@ -177,10 +178,52 @@ const Store = (() => {
     };
   }
 
+  // 지운 기록은 여기서 빠지므로, 방문 목록과 주기 계산이 모두 알아서 따라간다.
   function visitsOf(state, customerId) {
     return state.visits
-      .filter(v => v.customerId === customerId)
+      .filter(v => v.customerId === customerId && !v.deletedAt)
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.id - a.id));
+  }
+
+  // ---- 방문 기록 지우기 ----------------------------------------------------
+  // 고객 지우기와 같은 두 단계. [지우기]는 감추기만 하고, [완전히 지우기]라야 없앤다.
+
+  function requireVisit(state, visitId) {
+    const v = state.visits.find(x => x.id === visitId);
+    if (!v) throw new Error('방문 기록을 찾을 수 없습니다');
+    return v;
+  }
+
+  function deleteVisit(state, visitId, now) {
+    const v = requireVisit(state, visitId);
+    if (v.deletedAt) return { state, visit: v };
+    const updated = { ...v, deletedAt: now };
+    return {
+      state: { ...state, visits: state.visits.map(x => (x.id === visitId ? updated : x)) },
+      visit: updated,
+    };
+  }
+
+  function restoreVisit(state, visitId) {
+    const v = requireVisit(state, visitId);
+    if (!v.deletedAt) return { state, visit: v };
+    const updated = { ...v, deletedAt: null };
+    return {
+      state: { ...state, visits: state.visits.map(x => (x.id === visitId ? updated : x)) },
+      visit: updated,
+    };
+  }
+
+  function purgeVisit(state, visitId) {
+    requireVisit(state, visitId);
+    return { state: { ...state, visits: state.visits.filter(x => x.id !== visitId) } };
+  }
+
+  // 그 고객의 지운 기록. 최근에 지운 것이 위로.
+  function deletedVisitsOf(state, customerId) {
+    return state.visits
+      .filter(v => v.customerId === customerId && v.deletedAt)
+      .sort((a, b) => (a.deletedAt < b.deletedAt ? 1 : a.deletedAt > b.deletedAt ? -1 : b.id - a.id));
   }
 
   // ---- 방문 주기 ----------------------------------------------------------
@@ -319,7 +362,7 @@ const Store = (() => {
       id: m.id, customerId: m.customerId, done: m.text, next: '', createdAt: m.createdAt,
       history: (m.history ?? []).map(h => ({ done: h.text, next: '', replacedAt: h.replacedAt })),
     }));
-    const visits = [...(p.visits ?? []), ...fromMemos];
+    const visits = [...(p.visits ?? []), ...fromMemos].map(v => ({ ...v, deletedAt: v.deletedAt ?? null }));
     const today = migrateToday(p.today);
     return { nextId: p.nextId ?? 1, customers, visits, today };
   }
@@ -336,7 +379,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;
