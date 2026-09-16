@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, timeSlots, formatWon, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -809,4 +809,140 @@ test('정액권 칸이 없던 옛 백업은 잔액 0원으로 시작한다', () 
   const state = deserialize(old);
   assert.deepEqual(state.passes, []);
   assert.equal(passBalance(state, 1), 0);
+});
+
+// ---- 정액권 안내문 ---------------------------------------------------------
+// 손님이 받는 문자다. 아티팩트에서 쓰던 문장과 글자 하나까지 같아야 한다.
+
+const TPL = { head: '정액권 안내드려요', tail: '입니다 : D' };
+
+test('충전과 시술 한 건이 있는 안내문이 쓰던 문장 그대로 나온다', () => {
+  const got = buildNotice({
+    ...TPL, prev: 194400,
+    items: [{ name: '매직C컬', amount: 230000 }],
+    topup: { name: 'Gold 예약권', amount: 2500000, terms: '사용기한:~18개월 / 우선예약권:소진시까지', gift: '1000ml 프로틴트리트먼트 & 750ml 두피트리트먼트' },
+  });
+  assert.equal(got, [
+    '* 정액권 안내드려요 *',
+    '',
+    '- 잔여 정액금 194,400원',
+    '- Gold 예약권 2,500,000원',
+    '(사용기한:~18개월 / 우선예약권:소진시까지)',
+    '- 1000ml 프로틴트리트먼트 & 750ml 두피트리트먼트 선물',
+    '',
+    '* 시술내역 *',
+    '매직C컬 230,000 원 사용하셔서',
+    '',
+    '남은 정액권은 2,464,400원입니다 : D',
+  ].join('\n'));
+});
+
+test('충전 없이 시술만 있으면 충전 줄이 빠진다', () => {
+  const got = buildNotice({ ...TPL, prev: 300000, items: [{ name: '여성컷', amount: 30000 }], topup: null });
+  assert.equal(got, [
+    '* 정액권 안내드려요 *', '',
+    '- 잔여 정액금 300,000원', '',
+    '* 시술내역 *',
+    '여성컷 30,000 원 사용하셔서', '',
+    '남은 정액권은 270,000원입니다 : D',
+  ].join('\n'));
+});
+
+test('시술이 여러 건이면 줄줄이 적고 합계 줄이 붙는다', () => {
+  const got = buildNotice({
+    ...TPL, prev: 300000,
+    items: [{ name: '여성컷', amount: 30000 }, { name: '염색', amount: 80000 }, { name: '모발클리닉', amount: 50000 }],
+    topup: null,
+  });
+  assert.deepEqual(got.split('\n').slice(4), [
+    '* 시술내역 *',
+    '여성컷 30,000 원',
+    '염색 80,000 원',
+    '모발클리닉 50,000 원',
+    '합계 160,000 원 사용하셔서',
+    '',
+    '남은 정액권은 140,000원입니다 : D',
+  ]);
+});
+
+test('조건이나 선물이 비어 있으면 그 줄은 아예 안 나온다', () => {
+  const got = buildNotice({ ...TPL, prev: 0, items: [{ name: '여성컷', amount: 30000 }], topup: { name: '실버권', amount: 500000, terms: '', gift: '' } });
+  assert.deepEqual(got.split('\n'), [
+    '* 정액권 안내드려요 *', '',
+    '- 잔여 정액금 0원',
+    '- 실버권 500,000원', '',
+    '* 시술내역 *',
+    '여성컷 30,000 원 사용하셔서', '',
+    '남은 정액권은 470,000원입니다 : D',
+  ], '조건 줄과 선물 줄이 통째로 빠진다');
+});
+
+test('시술을 아직 안 적었으면 적으라고 안내한다', () => {
+  const got = buildNotice({ ...TPL, prev: 100000, items: [], topup: null });
+  assert.equal(got.includes('(시술 항목을 적어 주세요)'), true);
+  assert.equal(got.includes('남은 정액권은 100,000원입니다 : D'), true);
+});
+
+test('이름이나 금액이 빈 줄은 문자에 안 들어간다', () => {
+  const items = [{ name: '여성컷', amount: 30000 }, { name: '', amount: 0 }, { name: '  ', amount: '' }];
+  assert.equal(noticeUsed(items), 30000);
+  assert.equal(buildNotice({ ...TPL, prev: 0, items, topup: null }).includes('원 사용하셔서'), true);
+  assert.equal(buildNotice({ ...TPL, prev: 0, items, topup: null }).includes('합계'), false, '한 줄뿐이면 합계를 안 쓴다');
+});
+
+test('머리말과 맺음말을 바꾸면 문자도 따라 바뀐다', () => {
+  const got = buildNotice({ head: '오늘도 감사합니다', tail: ' 남았습니다.', prev: 50000, items: [{ name: '앞머리컷', amount: 10000 }], topup: null });
+  assert.equal(got.split('\n')[0], '* 오늘도 감사합니다 *');
+  assert.equal(got.split('\n').pop(), '남은 정액권은 40,000원 남았습니다.');
+  const blank = buildNotice({ head: '   ', tail: '', prev: 0, items: [], topup: null });
+  assert.equal(blank.split('\n')[0], '* 정액권 안내드려요 *', '머리말을 비우면 기본 문구로');
+  assert.equal(blank.split('\n').pop(), '남은 정액권은 0원', '맺음말은 비울 수 있다');
+});
+
+test('남는 돈은 이전 잔액 + 충전 - 시술이다', () => {
+  assert.equal(noticeRemain({ prev: 194400, items: [{ name: 'a', amount: 230000 }], topup: { amount: 2500000 } }), 2464400);
+  assert.equal(noticeRemain({ prev: 100000, items: [{ name: 'a', amount: 30000 }], topup: null }), 70000);
+  assert.equal(noticeRemain({ prev: 10000, items: [{ name: 'a', amount: 30000 }], topup: null }), -20000, '모자라면 음수로 보여 준다');
+  assert.equal(noticeRemain({ prev: 0, items: [], topup: null }), 0);
+});
+
+test('세 자리마다 쉼표를 찍는다', () => {
+  assert.equal(comma(0), '0');
+  assert.equal(comma(2500000), '2,500,000');
+  assert.equal(comma(-20000), '-20,000');
+});
+
+test('머리말·맺음말은 저장되고 백업에도 따라간다', () => {
+  let state = createState();
+  assert.equal(state.settings.head, '정액권 안내드려요');
+  assert.equal(state.settings.tail, '입니다 : D');
+  ({ state } = setSettings(state, { head: '오늘도 감사합니다' }));
+  assert.equal(state.settings.head, '오늘도 감사합니다');
+  assert.equal(state.settings.tail, '입니다 : D', '건드리지 않은 것은 그대로');
+  assert.deepEqual(deserialize(serialize(state)).settings, state.settings);
+});
+
+test('쓴 정액권 상품을 기억했다가 이름으로 찾아 준다', () => {
+  let state = createState();
+  const gold = { name: 'Gold 예약권', amount: 2500000, terms: '사용기한:~18개월', gift: '트리트먼트' };
+  ({ state } = rememberProduct(state, gold));
+  ({ state } = rememberProduct(state, { name: '실버권', amount: 500000, terms: '', gift: '' }));
+  assert.deepEqual(state.settings.products.map(p => p.name), ['Gold 예약권', '실버권']);
+  assert.deepEqual(findProduct(state, 'Gold 예약권'), gold);
+  assert.equal(findProduct(state, '없는권'), null);
+
+  // 같은 이름을 다시 쓰면 늘지 않고 최신 내용으로 바뀐다
+  ({ state } = rememberProduct(state, { name: 'Gold 예약권', amount: 3000000, terms: '사용기한:~24개월', gift: '' }));
+  assert.equal(state.settings.products.length, 2);
+  assert.equal(findProduct(state, 'Gold 예약권').amount, 3000000);
+
+  // 이름이 비면 기억하지 않는다
+  ({ state } = rememberProduct(state, { name: '  ', amount: 100 }));
+  assert.equal(state.settings.products.length, 2);
+});
+
+test('설정이 없던 옛 백업도 기본 문구로 열린다', () => {
+  const old = JSON.stringify({ nextId: 2, customers: [{ id: 1, name: '김OO' }], visits: [], today: { date: '', customerIds: [] } });
+  const state = deserialize(old);
+  assert.deepEqual(state.settings, { head: '정액권 안내드려요', tail: '입니다 : D', products: [] });
 });

@@ -10,6 +10,7 @@
   let visitTrashOpen = false;
   let passForm = null;   // null | 'charge' | 'use'
   let passOpen = false;
+  let noticeOpen = false;
 
   const $ = (sel) => document.querySelector(sel);
   const pad = (n) => String(n).padStart(2, '0');
@@ -24,7 +25,7 @@
     localStorage.setItem(KEY, Store.serialize(state));
   }
   function showMsg(el, text, kind) { if (el) { el.textContent = text; el.className = `msg ${kind}`; } }
-  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; passForm = null; passOpen = false; commit(Store.markToday(state, id, today()).state); render(); }
+  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; passForm = null; passOpen = false; noticeOpen = false; commit(Store.markToday(state, id, today()).state); render(); }
 
   // ---- 왼쪽: 고객 목록 ----------------------------------------------------
   function renderCustomers() {
@@ -94,6 +95,115 @@
               </div>`).join('')}
           </details>`}
       </div>`;
+  }
+
+  // ---- 정액권 안내문 만들기 ------------------------------------------------
+  // 손님에게 보낼 문자를 여기서 만들어 복사한다. 고객 이름과 잔액은 이미 카드에
+  // 있으니 다시 적지 않는다. 글자를 칠 때마다 카드 전체를 다시 그리면 커서가
+  // 날아가므로, 아래 refreshNotice가 미리보기와 합계만 바꾼다.
+
+  const digitsOf = (v) => Number(String(v ?? '').replace(/[^\d]/g, '')) || 0;
+
+  function renderNotice(c) {
+    const st = state.settings;
+    const bal = Store.passBalance(state, c.id);
+    return `
+      <details class="notice" ${noticeOpen ? 'open' : ''}>
+        <summary>정액권 안내문 만들기 <small>잔액 ${Store.formatWon(bal)}</small></summary>
+        <div class="notice-body">
+          <label style="margin-top:0">오늘 시술</label>
+          <div id="notice-items"></div>
+          <button type="button" class="secondary small" data-action="notice-add">+ 시술 한 줄 더</button>
+
+          <label class="check"><input type="checkbox" id="notice-topup-on"> 정액권 충전 안내 넣기</label>
+          <div id="notice-topup" hidden>
+            <div class="row">
+              <input type="text" id="notice-topup-name" list="product-list" placeholder="정액권 이름 (예: Gold 예약권)" autocomplete="off">
+              <input type="text" id="notice-topup-amt" class="won" inputmode="numeric" placeholder="결제 금액" autocomplete="off">
+            </div>
+            <input type="text" id="notice-topup-terms" placeholder="괄호 안 조건 (예: 사용기한:~18개월 / 우선예약권:소진시까지)" autocomplete="off">
+            <input type="text" id="notice-topup-gift" placeholder="함께 드리는 선물 (비워도 됨)" autocomplete="off">
+            ${st.products.length ? `<p class="hint">이름 칸에서 ${esc(st.products.map((p) => p.name).join(' · '))} 중 하나를 고르면 금액·조건·선물이 저절로 채워집니다.</p>` : ''}
+          </div>
+          <datalist id="product-list">${st.products.map((p) => `<option value="${esc(p.name)}"></option>`).join('')}</datalist>
+
+          <details class="tpl">
+            <summary>머리말 · 맺음말 바꾸기</summary>
+            <input type="text" id="notice-head" value="${esc(st.head)}" placeholder="맨 윗줄 (양옆 * 는 자동)">
+            <input type="text" id="notice-tail" value="${esc(st.tail)}" placeholder="마지막 줄 금액 뒤에 붙는 말">
+          </details>
+
+          <div class="notice-total"><span>남은 정액권</span><b id="notice-total">${Store.formatWon(bal)}</b></div>
+          <pre class="preview" id="notice-preview"></pre>
+          <div class="row">
+            <div class="msg" id="notice-msg"></div>
+            <button type="button" class="secondary" data-action="notice-copy">복사만</button>
+            <button type="button" data-action="notice-apply">복사하고 정액권에 반영</button>
+          </div>
+        </div>
+      </details>`;
+  }
+
+  function noticeRow(name = '', amount = '') {
+    const row = document.createElement('div');
+    row.className = 'row notice-item';
+    row.innerHTML = `
+      <input type="text" class="it-name" list="service-list" placeholder="시술명" autocomplete="off" value="${esc(name)}">
+      <input type="text" class="it-amt won" inputmode="numeric" placeholder="금액" autocomplete="off" value="${esc(amount)}">
+      <button type="button" class="secondary small" data-action="notice-row-del">×</button>`;
+    return row;
+  }
+
+  function readNotice() {
+    const items = [...document.querySelectorAll('.notice-item')].map((r) => ({
+      name: r.querySelector('.it-name').value.trim(),
+      amount: digitsOf(r.querySelector('.it-amt').value),
+    }));
+    const on = $('#notice-topup-on').checked;
+    const tName = $('#notice-topup-name').value.trim();
+    const tAmt = digitsOf($('#notice-topup-amt').value);
+    return {
+      head: $('#notice-head').value,
+      tail: $('#notice-tail').value,
+      prev: Store.passBalance(state, view.id),
+      items,
+      // 스위치를 켰어도 이름·금액이 둘 다 비면 빈 줄을 내보내지 않는다
+      topup: on && (tName || tAmt)
+        ? { name: tName, amount: tAmt, terms: $('#notice-topup-terms').value, gift: $('#notice-topup-gift').value }
+        : null,
+    };
+  }
+
+  function refreshNotice() {
+    if (!$('#notice-preview')) return;
+    const f = readNotice();
+    const remain = Store.noticeRemain(f);
+    const total = $('#notice-total');
+    total.textContent = Store.formatWon(remain);
+    total.classList.toggle('short', remain < 0);
+    $('#notice-preview').textContent = Store.buildNotice(f);
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(() => true, () => legacyCopy(text));
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+  // file:// 로 연 화면에서는 위 방법이 막히기도 한다. 그때 쓰는 옛 방식.
+  function legacyCopy(text) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch { return false; }
   }
 
   // 며칠 만의 방문인지 한 줄로. 아직 온 적이 없으면 '첫 방문'.
@@ -209,11 +319,9 @@
         <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
         <label>다음에 하기로 한 방향 (비워도 됨)</label>
         <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담"></textarea>
-        ${Store.passBalance(state, c.id) > 0 ? `
-          <label>정액권에서 차감 (비워도 됨) · 잔액 ${Store.formatWon(Store.passBalance(state, c.id))}</label>
-          <input type="text" id="visit-deduct" inputmode="numeric" placeholder="예: 50000" autocomplete="off" style="max-width:220px">` : ''}
-        <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
+          <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
       </form>
+      ${renderNotice(c)}
       <h3>지난 방문</h3>
       ${visits.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : visits.map(renderVisit).join('')}
       ${renderDeletedVisits(c)}`;
@@ -322,11 +430,19 @@
       </div>`;
   }
 
+  // 안내문 칸을 그린 직후 첫 줄과 미리보기를 채운다.
+  function setupNotice() {
+    const box = $('#notice-items');
+    if (!box) return;
+    if (!box.firstElementChild) box.appendChild(noticeRow());
+    refreshNotice();
+  }
+
   function render() {
     renderCustomers();
     renderTrash();
     const card = $('#card');
-    if (view.kind === 'card' && customerOf(view.id)) card.innerHTML = renderCard(customerOf(view.id));
+    if (view.kind === 'card' && customerOf(view.id)) { card.innerHTML = renderCard(customerOf(view.id)); setupNotice(); }
     else { view = { kind: 'today' }; card.innerHTML = renderToday(); renderAddHits(); }
   }
 
@@ -388,6 +504,48 @@
       else if (a === 'save-profile') {
         commit(Store.setProfile(state, view.id, { talk: $('#profile-talk').value, hair: $('#profile-hair').value }, now()).state);
         editingProfile = false; render();
+      }
+      else if (a === 'notice-add') {
+        $('#notice-items').appendChild(noticeRow());
+        $('#notice-items').lastElementChild.querySelector('.it-name').focus();
+        refreshNotice();
+      }
+      else if (a === 'notice-row-del') {
+        btn.closest('.notice-item').remove();
+        if (!document.querySelector('.notice-item')) $('#notice-items').appendChild(noticeRow());
+        refreshNotice();
+      }
+      else if (a === 'notice-copy' || a === 'notice-apply') {
+        const f = readNotice();
+        const used = Store.noticeUsed(f.items);
+        if (!used && !f.topup) { showMsg($('#notice-msg'), '오늘 시술이나 충전 내역을 먼저 적으세요', 'error'); return; }
+
+        // 반영은 저장까지 하므로 먼저 계산해 본다. 잔액이 모자라면 여기서 막혀
+        // 문자만 나가고 숫자는 안 맞는 일이 생기지 않는다.
+        let next = state;
+        try {
+          if (a === 'notice-apply') {
+            if (f.topup) {
+              next = Store.chargePass(next, view.id, { amount: f.topup.amount, note: f.topup.name || '정액권 충전' }, now()).state;
+              next = Store.rememberProduct(next, f.topup).state;
+            }
+            if (used) {
+              const what = f.items.map((it) => it.name).filter(Boolean).join(' · ') || '시술';
+              next = Store.usePass(next, view.id, { amount: used, note: what }, now()).state;
+            }
+          }
+        } catch (err) { showMsg($('#notice-msg'), err.message, 'error'); return; }
+        const text = Store.buildNotice(f);
+        commit(next);
+        const remain = Store.passBalance(state, view.id);
+        copyText(text).then((ok) => {
+          if (a === 'notice-copy') { noticeOpen = true; render(); }
+          showMsg($('#notice-msg'),
+            ok ? (a === 'notice-apply' ? `복사했습니다 · 잔액 ${Store.formatWon(remain)}` : '복사했습니다')
+               : '자동 복사가 막혔습니다. 아래 글을 직접 복사하세요',
+            ok ? 'ok' : 'error');
+        });
+        if (a === 'notice-apply') { noticeOpen = true; render(); showMsg($('#notice-msg'), `정액권에 반영했습니다 · 잔액 ${Store.formatWon(remain)}`, 'ok'); }
       }
       else if (a === 'pass-charge' || a === 'pass-use') {
         passForm = a === 'pass-charge' ? 'charge' : 'use'; render(); $('#pass-amount').focus();
@@ -469,10 +627,15 @@
   $('#card').addEventListener('click', (e) => {
     if (e.target.closest('details.trash summary')) visitTrashOpen = !visitTrashOpen;
     if (e.target.closest('details.pass-list summary')) passOpen = !passOpen;
+    if (e.target.closest('details.notice > summary')) {
+      noticeOpen = !noticeOpen;
+      if (noticeOpen) setTimeout(setupNotice, 0);
+    }
   });
 
   $('#card').addEventListener('input', (e) => {
-    if (e.target.id === 'add-name') renderAddHits();
+    if (e.target.id === 'add-name') { renderAddHits(); return; }
+    if (e.target.closest('.notice')) refreshNotice();
   });
 
   // 시간 → Tab → 이름 → Enter 로 한 명씩 빠르게 올린다
@@ -481,6 +644,33 @@
     e.preventDefault();
     const first = $('#add-hits button[data-add]') || $('#add-hits button[data-add-new]');
     if (first) first.click();
+  });
+
+  $('#card').addEventListener('change', (e) => {
+    if (e.target.id === 'notice-topup-on') { $('#notice-topup').hidden = !e.target.checked; refreshNotice(); return; }
+    // 다시 그리지 않는다. 그리면 지금 치던 칸에서 커서가 날아간다.
+    if (e.target.id === 'notice-head' || e.target.id === 'notice-tail') {
+      commit(Store.setSettings(state, { head: $('#notice-head').value, tail: $('#notice-tail').value }).state);
+      return;
+    }
+    // 기억해 둔 상품을 고르면 금액·조건·선물을 채워 준다
+    if (e.target.id === 'notice-topup-name') {
+      const p = Store.findProduct(state, e.target.value);
+      if (p) {
+        $('#notice-topup-amt').value = Store.comma(p.amount);
+        $('#notice-topup-terms').value = p.terms;
+        $('#notice-topup-gift').value = p.gift;
+      }
+      refreshNotice();
+      return;
+    }
+    // 금액 칸은 손을 뗄 때 쉼표를 찍는다. 글자 치는 중에 찍으면 커서가 튄다.
+    if (e.target.classList.contains('won')) {
+      const n = digitsOf(e.target.value);
+      e.target.value = n ? Store.comma(n) : '';
+      refreshNotice();
+      return;
+    }
   });
 
   // 명단에 올린 뒤 시간을 고치면 줄 순서도 따라 바뀐다
@@ -502,15 +692,9 @@
     if (e.target.id !== 'visit-form') return;
     e.preventDefault();
     try {
-      const t = now();
-      const deduct = ($('#visit-deduct')?.value ?? '').trim();
-      const made = Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value }, t);
-      const next = deduct
-        ? Store.usePass(made.state, view.id, { amount: deduct, note: '방문 기록과 함께', visitId: made.visit.id }, t).state
-        : made.state;
-      commit(next);
+      commit(Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value }, now()).state);
       render();
-      showMsg($('#visit-msg'), deduct ? `저장했습니다 · 정액권 잔액 ${Store.formatWon(Store.passBalance(state, view.id))}` : '저장했습니다', 'ok');
+      showMsg($('#visit-msg'), '저장했습니다', 'ok');
     } catch (err) { showMsg($('#visit-msg'), err.message, 'error'); }
   });
 

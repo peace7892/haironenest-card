@@ -5,7 +5,7 @@ const Store = (() => {
   const emptyProfile = () => ({ talk: '', hair: '' });
 
   function createState() {
-    return { nextId: 1, customers: [], visits: [], passes: [], today: { date: '', entries: [] } };
+    return { nextId: 1, customers: [], visits: [], passes: [], settings: defaultSettings(), today: { date: '', entries: [] } };
   }
 
   // ---- 고객 --------------------------------------------------------------
@@ -333,6 +333,61 @@ const Store = (() => {
     return { state: { ...state, passes: state.passes.filter(p => p.id !== entryId) } };
   }
 
+  // ---- 정액권 안내문 -------------------------------------------------------
+  // 원장님이 쓰시던 안내문 아티팩트의 문장을 그대로 옮겼다. 손님이 받는 문자라
+  // 줄 순서와 띄어쓰기('230,000 원'처럼 원 앞 한 칸)까지 건드리지 않는다.
+
+  const comma = (n) => String(Math.trunc(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+  const defaultSettings = () => ({ head: '정액권 안내드려요', tail: '입니다 : D', products: [] });
+
+  const noticeItems = (items) => (items ?? []).filter(it => (it.name ?? '').trim() || Number(it.amount));
+  const noticeUsed = (items) => noticeItems(items).reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+
+  function noticeRemain({ prev, items, topup }) {
+    return (Number(prev) || 0) + (topup ? (Number(topup.amount) || 0) : 0) - noticeUsed(items);
+  }
+
+  function buildNotice({ head, tail, prev, items, topup }) {
+    const rows = noticeItems(items);
+    const L = [];
+    L.push(`* ${(head ?? '').trim() || '정액권 안내드려요'} *`);
+    L.push('');
+    L.push(`- 잔여 정액금 ${comma(prev)}원`);
+    if (topup) {
+      L.push(`- ${(topup.name ?? '').trim() || '정액권'} ${comma(topup.amount)}원`);
+      if ((topup.terms ?? '').trim()) L.push(`(${topup.terms.trim()})`);
+      if ((topup.gift ?? '').trim()) L.push(`- ${topup.gift.trim()} 선물`);
+    }
+    L.push('');
+    L.push('* 시술내역 *');
+    if (rows.length === 0) L.push('(시술 항목을 적어 주세요)');
+    else if (rows.length === 1) L.push(`${rows[0].name} ${comma(rows[0].amount)} 원 사용하셔서`);
+    else {
+      rows.forEach(it => L.push(`${it.name} ${comma(it.amount)} 원`));
+      L.push(`합계 ${comma(noticeUsed(rows))} 원 사용하셔서`);
+    }
+    L.push('');
+    L.push(`남은 정액권은 ${comma(noticeRemain({ prev, items: rows, topup }))}원${tail ?? ''}`);
+    return L.join('\n');
+  }
+
+  function setSettings(state, patch) {
+    return { state: { ...state, settings: { ...state.settings, ...patch } } };
+  }
+
+  // 한 번 쓴 정액권 상품을 기억해 두었다가, 다음에 이름만 고르면 나머지가 채워지게 한다.
+  function rememberProduct(state, { name, amount, terms, gift }) {
+    const n = (name ?? '').trim();
+    if (!n) return { state };
+    const item = { name: n, amount: Number(amount) || 0, terms: (terms ?? '').trim(), gift: (gift ?? '').trim() };
+    const has = state.settings.products.some(p => p.name === n);
+    const products = has ? state.settings.products.map(p => (p.name === n ? item : p)) : [...state.settings.products, item];
+    return { state: { ...state, settings: { ...state.settings, products } } };
+  }
+
+  const findProduct = (state, name) => state.settings.products.find(p => p.name === (name ?? '').trim()) ?? null;
+
   // ---- 오늘 명단 ----------------------------------------------------------
 
   // 명단 한 줄은 { customerId, at }. at은 'HH:MM'이거나 ''(시간 안 정함).
@@ -441,9 +496,22 @@ const Store = (() => {
     }));
     const visits = [...(p.visits ?? []), ...fromMemos].map(v => ({ ...v, deletedAt: v.deletedAt ?? null }));
     const today = migrateToday(p.today);
+    const settings = migrateSettings(p.settings);
     const passes = (p.passes ?? []).filter(x => x && typeof x.customerId === 'number' && (x.kind === 'charge' || x.kind === 'use'))
       .map(x => ({ id: x.id, customerId: x.customerId, kind: x.kind, amount: Number(x.amount) || 0, note: x.note ?? '', at: x.at ?? '', visitId: x.visitId ?? null }));
-    return { nextId: p.nextId ?? 1, customers, visits, passes, today };
+    return { nextId: p.nextId ?? 1, customers, visits, passes, settings, today };
+  }
+
+  function migrateSettings(v) {
+    const d = defaultSettings();
+    if (!v || typeof v !== 'object') return d;
+    return {
+      head: typeof v.head === 'string' ? v.head : d.head,
+      tail: typeof v.tail === 'string' ? v.tail : d.tail,
+      products: (Array.isArray(v.products) ? v.products : []).filter(p => p && p.name).map(p => ({
+        name: String(p.name), amount: Number(p.amount) || 0, terms: String(p.terms ?? ''), gift: String(p.gift ?? ''),
+      })),
+    };
   }
 
   // 옛 백업은 오늘 명단이 번호 목록(customerIds)이었다. 시간 없는 줄로 옮긴다.
@@ -458,7 +526,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { createState, timeSlots, formatWon, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

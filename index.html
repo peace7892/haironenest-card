@@ -101,6 +101,26 @@
   .pass-row .won.use { color: var(--danger); }
   .pass-row .memo { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status.pass { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  details.notice { background: #fff; border: 1px solid var(--line); border-radius: 10px; margin: 18px 0 4px; }
+  details.notice > summary { padding: 12px 16px; margin: 0; color: var(--ink); font-weight: 600; }
+  details.notice > summary small { color: var(--muted); font-weight: normal; margin-left: 6px; }
+  .notice-body { padding: 0 16px 16px; border-top: 1px solid var(--line); }
+  .notice-item { margin-bottom: 6px; }
+  .notice-item .it-amt { flex: 0 0 140px; }
+  .notice-item > button { flex: 0 0 auto; }
+  .notice .check { display: flex; align-items: center; gap: 8px; margin: 16px 0 8px; font-size: 15px; color: var(--ink); cursor: pointer; }
+  .notice .check input { width: 17px; height: 17px; }
+  #notice-topup > * { margin-bottom: 6px; }
+  .notice .hint { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+  details.tpl { margin-top: 12px; }
+  details.tpl > summary { color: var(--muted); font-size: 14px; }
+  details.tpl > input { margin-top: 6px; }
+  .notice-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 16px; padding-top: 12px; border-top: 2px solid var(--ink); }
+  .notice-total span { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .notice-total b { font-size: 26px; }
+  .notice-total b.short { color: var(--danger); }
+  .preview { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 14px; line-height: 1.65; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 14px 15px; margin: 12px 0 0; max-height: 340px; overflow-y: auto; }
+  input.won { text-align: right; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -131,6 +151,13 @@
   </aside>
   <section id="card"></section>
 </main>
+<datalist id="service-list">
+  <option value="여성컷"></option><option value="남성컷"></option><option value="남성다운컷"></option>
+  <option value="앞머리컷"></option><option value="어린이컷"></option><option value="염색"></option>
+  <option value="일반펌"></option><option value="셋팅펌"></option><option value="매직"></option>
+  <option value="매직C컬"></option><option value="매직셋팅펌"></option><option value="모발클리닉"></option>
+  <option value="두피클리닉"></option><option value="헤어컨설팅"></option><option value="점판"></option>
+</datalist>
 <script src="store.js"></script>
 <script src="app.js"></script>
 </body>
