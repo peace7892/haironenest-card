@@ -86,6 +86,21 @@
   .visit .meta .acts { display: flex; gap: 10px; align-items: center; flex: 0 0 auto; }
   details.trash > .visit { background: var(--bg); }
   .visit .meta .left { color: var(--danger); font-weight: 600; }
+  .pass { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 12px 0 0; }
+  .pass > .row > div { flex: 1; }
+  .pass .amount { font-size: 20px; font-weight: 700; color: var(--muted); margin-left: 6px; }
+  .pass .amount.has { color: var(--accent); }
+  .pass .note { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .pass .pass-form { margin-top: 10px; }
+  .pass details { border-top: 1px solid var(--line); margin-top: 8px; }
+  .pass-row { display: grid; grid-template-columns: 140px 48px 110px 1fr auto; gap: 10px; align-items: center; padding: 7px 0; font-size: 14px; border-top: 1px solid var(--bg); }
+  .pass-row .when { color: var(--muted); }
+  .pass-row .kind { font-size: 12px; text-align: center; padding: 2px 0; border-radius: 999px; background: var(--bg); color: var(--muted); }
+  .pass-row .won { font-weight: 700; text-align: right; }
+  .pass-row .won.charge { color: var(--ok); }
+  .pass-row .won.use { color: var(--danger); }
+  .pass-row .memo { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status.pass { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
 </style>
 </head>
 <body>

@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, timeSlots, formatWon, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -667,4 +667,146 @@ test('저절로 없어진 뒤에도 주기 계산은 멀쩡하다', () => {
   assert.equal(c.count, 2);
   assert.equal(c.average, 126);
   assert.equal(c.sinceLast, 11);
+});
+
+// ---- 정액권 (금액권) -------------------------------------------------------
+
+function withPass() {
+  let { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  return { state, id: customer.id };
+}
+const T = (n) => `2026-09-${String(n).padStart(2, '0')}T14:00:00`;
+
+test('금액은 150000 · 150,000 · 15만 · 150000원을 모두 같은 값으로 읽는다', () => {
+  for (const v of ['150000', '150,000', '15만', '150000원', ' 150,000 원 ']) assert.equal(cleanAmount(v), 150000);
+  assert.equal(cleanAmount('3만'), 30000);
+});
+
+test('금액이 말이 안 되면 막고 알려준다', () => {
+  for (const v of ['', '   ', '영만원', '-5000', '0', '1.5만', '만']) {
+    assert.throws(() => cleanAmount(v), /금액/, `${JSON.stringify(v)}는 막아야 한다`);
+  }
+});
+
+test('금액은 세 자리마다 쉼표를 찍어 보여준다', () => {
+  assert.equal(formatWon(0), '0원');
+  assert.equal(formatWon(5000), '5,000원');
+  assert.equal(formatWon(150000), '150,000원');
+  assert.equal(formatWon(1234567), '1,234,567원');
+});
+
+test('충전하면 잔액이 늘고 사용하면 준다', () => {
+  let { state, id } = withPass();
+  assert.equal(passBalance(state, id), 0, '아직 아무것도 없으면 0원');
+  ({ state } = chargePass(state, id, { amount: '30만', note: '3월 충전' }, T(1)));
+  assert.equal(passBalance(state, id), 300000);
+  ({ state } = usePass(state, id, { amount: '50000' }, T(4)));
+  assert.equal(passBalance(state, id), 250000);
+  ({ state } = usePass(state, id, { amount: '50000' }, T(20)));
+  assert.equal(passBalance(state, id), 200000);
+});
+
+test('잔액보다 많이 쓰려 하면 막고 남은 돈을 알려준다', () => {
+  let { state, id } = withPass();
+  ({ state } = chargePass(state, id, { amount: '150000' }, T(1)));
+  assert.throws(() => usePass(state, id, { amount: '150001' }, T(4)), /150,000원.*많습니다/);
+  assert.equal(passBalance(state, id), 150000, '막혔으니 잔액은 그대로');
+  const ok = usePass(state, id, { amount: '150000' }, T(4));
+  assert.equal(passBalance(ok.state, id), 0, '딱 맞게 쓰는 것은 된다');
+});
+
+test('내역은 최신순으로, 충전인지 사용인지와 메모를 함께 준다', () => {
+  let { state, id } = withPass();
+  ({ state } = chargePass(state, id, { amount: '300000', note: '3월 충전' }, T(1)));
+  ({ state } = usePass(state, id, { amount: '50000', note: '컷' }, T(4)));
+  ({ state } = usePass(state, id, { amount: '80000', note: '펌' }, T(20)));
+  const list = passEntriesOf(state, id);
+  assert.deepEqual(list.map(p => `${p.kind} ${p.amount} ${p.note}`), ['use 80000 펌', 'use 50000 컷', 'charge 300000 3월 충전']);
+});
+
+test('요약은 잔액과 지금까지 넣은 돈·쓴 돈을 함께 준다', () => {
+  let { state, id } = withPass();
+  ({ state } = chargePass(state, id, { amount: '300000' }, T(1)));
+  ({ state } = usePass(state, id, { amount: '50000' }, T(4)));
+  ({ state } = chargePass(state, id, { amount: '100000' }, T(10)));
+  const sum = passSummary(state, id);
+  assert.equal(sum.balance, 350000);
+  assert.equal(sum.charged, 400000);
+  assert.equal(sum.used, 50000);
+  assert.equal(sum.count, 3);
+  assert.equal(sum.lastAt, T(10));
+});
+
+test('내역 한 줄을 지우면 잔액이 곧바로 따라온다', () => {
+  let { state, id } = withPass();
+  ({ state } = chargePass(state, id, { amount: '300000' }, T(1)));
+  let wrong;
+  ({ state, entry: wrong } = usePass(state, id, { amount: '50000' }, T(4)));
+  assert.equal(passBalance(state, id), 250000);
+  ({ state } = deletePass(state, wrong.id));
+  assert.equal(passBalance(state, id), 300000);
+  assert.equal(passEntriesOf(state, id).length, 1);
+  assert.throws(() => deletePass(state, wrong.id), /찾을 수 없습니다/);
+});
+
+test('방문 기록과 함께 넣은 차감은 그 방문 번호를 달고 있다', () => {
+  let { state, id } = withPass();
+  ({ state } = chargePass(state, id, { amount: '300000' }, T(1)));
+  let v;
+  ({ state, visit: v } = addVisit(state, id, { done: '볼륨펌' }, T(4)));
+  let entry;
+  ({ state, entry } = usePass(state, id, { amount: '80000', note: '볼륨펌', visitId: v.id }, T(4)));
+  assert.equal(entry.visitId, v.id);
+  assert.equal(passEntriesOf(state, id)[0].visitId, v.id);
+});
+
+test('지운 고객에게는 충전도 사용도 할 수 없다', () => {
+  let { state, id } = withPass();
+  ({ state } = deleteCustomer(state, id, T(5)));
+  assert.throws(() => chargePass(state, id, { amount: '10000' }, T(5)), /지운 고객/);
+  assert.throws(() => usePass(state, id, { amount: '10000' }, T(5)), /지운 고객/);
+});
+
+test('고객을 완전히 지우면 정액권 내역도 함께 사라진다', () => {
+  let { state, id } = withPass();
+  ({ state } = chargePass(state, id, { amount: '300000' }, T(1)));
+  ({ state } = deleteCustomer(state, id, T(5)));
+  ({ state } = purgeCustomer(state, id));
+  assert.deepEqual(state.passes, []);
+});
+
+test('고객마다 잔액이 따로 센다', () => {
+  let { state, customer: a } = addCustomer(createState(), { name: '김OO', phone: '01011112222' });
+  let b;
+  ({ state, customer: b } = addCustomer(state, { name: '이OO', phone: '01033334444' }));
+  ({ state } = chargePass(state, a.id, { amount: '300000' }, T(1)));
+  ({ state } = chargePass(state, b.id, { amount: '100000' }, T(1)));
+  ({ state } = usePass(state, a.id, { amount: '50000' }, T(4)));
+  assert.equal(passBalance(state, a.id), 250000);
+  assert.equal(passBalance(state, b.id), 100000);
+});
+
+test('오늘 명단 줄에도 잔액이 함께 온다', () => {
+  let { state, id } = withPass();
+  ({ state } = chargePass(state, id, { amount: '300000' }, T(1)));
+  ({ state } = usePass(state, id, { amount: '50000' }, T(4)));
+  ({ state } = markToday(state, id, '2026-09-16', '10:30'));
+  assert.equal(todayList(state, '2026-09-16')[0].balance, 250000);
+});
+
+test('정액권도 저장했다 꺼내면 그대로다', () => {
+  let { state, id } = withPass();
+  ({ state } = chargePass(state, id, { amount: '300000', note: '3월 충전' }, T(1)));
+  ({ state } = usePass(state, id, { amount: '50000', note: '컷' }, T(4)));
+  assert.deepEqual(deserialize(serialize(state)), state);
+});
+
+test('정액권 칸이 없던 옛 백업은 잔액 0원으로 시작한다', () => {
+  const old = JSON.stringify({
+    nextId: 3, customers: [{ id: 1, name: '김OO', phone: '01011112222' }],
+    visits: [], today: { date: '', customerIds: [] },
+  });
+  const state = deserialize(old);
+  assert.deepEqual(state.passes, []);
+  assert.equal(passBalance(state, 1), 0);
 });

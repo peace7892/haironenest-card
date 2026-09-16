@@ -5,7 +5,7 @@ const Store = (() => {
   const emptyProfile = () => ({ talk: '', hair: '' });
 
   function createState() {
-    return { nextId: 1, customers: [], visits: [], today: { date: '', entries: [] } };
+    return { nextId: 1, customers: [], visits: [], passes: [], today: { date: '', entries: [] } };
   }
 
   // ---- 고객 --------------------------------------------------------------
@@ -123,6 +123,7 @@ const Store = (() => {
         ...state,
         customers: state.customers.filter(x => x.id !== customerId),
         visits: state.visits.filter(v => v.customerId !== customerId),
+        passes: state.passes.filter(x => x.customerId !== customerId),
         today: { ...state.today, entries: state.today.entries.filter(e => e.customerId !== customerId) },
       },
     };
@@ -274,6 +275,64 @@ const Store = (() => {
     };
   }
 
+  // ---- 정액권 (금액권) -----------------------------------------------------
+  // 충전(+)과 사용(-)을 쌓고 그 합이 잔액이다. 횟수권은 쓰지 않는다.
+  // 돈 계산의 원본은 핸드SOS다. 여기 숫자는 시술 중에 카드만 보고도 알려고 두는 것이다.
+
+  const formatWon = (n) => `${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}원`;
+
+  // '150000' '150,000' '150000원' '15만'을 모두 받는다.
+  function cleanAmount(v) {
+    const raw = String(v ?? '').trim().replace(/[\s,원]/g, '');
+    if (!raw) throw new Error('금액을 적으세요');
+    const man = /^(\d+)만$/.exec(raw);
+    const n = man ? Number(man[1]) * 10000 : (/^\d+$/.test(raw) ? Number(raw) : NaN);
+    if (!Number.isInteger(n) || n <= 0) throw new Error('금액은 숫자로 적으세요 (예: 150000 또는 15만)');
+    return n;
+  }
+
+  const passesOf = (state, customerId) => state.passes.filter(p => p.customerId === customerId);
+
+  // 최신순. 같은 시각이면 나중에 넣은 것이 위로.
+  function passEntriesOf(state, customerId) {
+    return passesOf(state, customerId).sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : b.id - a.id));
+  }
+
+  function passBalance(state, customerId) {
+    return passesOf(state, customerId).reduce((sum, p) => sum + (p.kind === 'charge' ? p.amount : -p.amount), 0);
+  }
+
+  function passSummary(state, customerId) {
+    const list = passEntriesOf(state, customerId);
+    return {
+      balance: passBalance(state, customerId),
+      charged: list.filter(p => p.kind === 'charge').reduce((s, p) => s + p.amount, 0),
+      used: list.filter(p => p.kind === 'use').reduce((s, p) => s + p.amount, 0),
+      count: list.length,
+      lastAt: list.length ? list[0].at : '',
+    };
+  }
+
+  function addPass(state, customerId, kind, { amount, note, visitId }, now) {
+    requireCustomer(state, customerId);
+    const won = cleanAmount(amount);
+    if (kind === 'use') {
+      const left = passBalance(state, customerId);
+      if (won > left) throw new Error(`정액권 잔액(${formatWon(left)})보다 많습니다`);
+    }
+    const entry = { id: state.nextId, customerId, kind, amount: won, note: (note ?? '').trim(), at: now, visitId: visitId ?? null };
+    return { state: { ...state, nextId: state.nextId + 1, passes: [...state.passes, entry] }, entry };
+  }
+
+  const chargePass = (state, customerId, fields, now) => addPass(state, customerId, 'charge', fields, now);
+  const usePass = (state, customerId, fields, now) => addPass(state, customerId, 'use', fields, now);
+
+  // 정액권 내역은 한 줄짜리 숫자라 바로 지운다. 잔액이 눈앞에서 바뀌므로 실수를 곧바로 안다.
+  function deletePass(state, entryId) {
+    if (!state.passes.some(p => p.id === entryId)) throw new Error('정액권 내역을 찾을 수 없습니다');
+    return { state: { ...state, passes: state.passes.filter(p => p.id !== entryId) } };
+  }
+
   // ---- 오늘 명단 ----------------------------------------------------------
 
   // 명단 한 줄은 { customerId, at }. at은 'HH:MM'이거나 ''(시간 안 정함).
@@ -353,7 +412,7 @@ const Store = (() => {
       const todays = visits.filter(v => v.createdAt.startsWith(date));
       const previous = visits.find(v => !v.createdAt.startsWith(date));
       const cycle = visitCycle(state, e.customerId, date);
-      return { order: idx + 1, at: e.at, customer, recorded: todays.length > 0, lastNext: previous ? previous.next : '', ...cycle };
+      return { order: idx + 1, at: e.at, customer, recorded: todays.length > 0, lastNext: previous ? previous.next : '', balance: passBalance(state, e.customerId), ...cycle };
     });
   }
 
@@ -382,7 +441,9 @@ const Store = (() => {
     }));
     const visits = [...(p.visits ?? []), ...fromMemos].map(v => ({ ...v, deletedAt: v.deletedAt ?? null }));
     const today = migrateToday(p.today);
-    return { nextId: p.nextId ?? 1, customers, visits, today };
+    const passes = (p.passes ?? []).filter(x => x && typeof x.customerId === 'number' && (x.kind === 'charge' || x.kind === 'use'))
+      .map(x => ({ id: x.id, customerId: x.customerId, kind: x.kind, amount: Number(x.amount) || 0, note: x.note ?? '', at: x.at ?? '', visitId: x.visitId ?? null }));
+    return { nextId: p.nextId ?? 1, customers, visits, passes, today };
   }
 
   // 옛 백업은 오늘 명단이 번호 목록(customerIds)이었다. 시간 없는 줄로 옮긴다.
@@ -397,7 +458,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { createState, timeSlots, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { createState, timeSlots, formatWon, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

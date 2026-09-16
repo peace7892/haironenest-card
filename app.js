@@ -8,6 +8,8 @@
   let editingIdentity = false;
   let trashOpen = false;
   let visitTrashOpen = false;
+  let passForm = null;   // null | 'charge' | 'use'
+  let passOpen = false;
 
   const $ = (sel) => document.querySelector(sel);
   const pad = (n) => String(n).padStart(2, '0');
@@ -22,7 +24,7 @@
     localStorage.setItem(KEY, Store.serialize(state));
   }
   function showMsg(el, text, kind) { if (el) { el.textContent = text; el.className = `msg ${kind}`; } }
-  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; commit(Store.markToday(state, id, today()).state); render(); }
+  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; passForm = null; passOpen = false; commit(Store.markToday(state, id, today()).state); render(); }
 
   // ---- 왼쪽: 고객 목록 ----------------------------------------------------
   function renderCustomers() {
@@ -53,6 +55,45 @@
   function leftText(left) {
     if (left === null) return '';
     return left === 0 ? '오늘 사라짐' : `${left}일 뒤 사라짐`;
+  }
+
+  // 정액권 상자. 잔액과 [충전]·[사용], 그리고 접어둔 내역.
+  function renderPass(c) {
+    const sum = Store.passSummary(state, c.id);
+    const won = Store.formatWon;
+    const form = passForm === null ? '' : `
+      <div class="pass-form">
+        <div class="row">
+          <input type="text" id="pass-amount" inputmode="numeric" placeholder="${passForm === 'charge' ? '충전할 금액 (예: 30만)' : '쓸 금액 (예: 50000)'}" autocomplete="off">
+          <input type="text" id="pass-note" placeholder="메모 (비워도 됨)" autocomplete="off">
+          <button type="button" class="secondary" data-action="pass-cancel">취소</button>
+          <button type="button" data-action="pass-save">${passForm === 'charge' ? '충전' : '사용'}</button>
+        </div>
+        <div class="msg" id="pass-msg"></div>
+      </div>`;
+    const list = Store.passEntriesOf(state, c.id);
+    return `
+      <div class="pass">
+        <div class="row">
+          <div><b>정액권</b> <span class="amount ${sum.balance > 0 ? 'has' : ''}">${won(sum.balance)}</span></div>
+          <button type="button" class="small secondary" data-action="pass-charge">충전</button>
+          <button type="button" class="small secondary" data-action="pass-use">사용</button>
+        </div>
+        ${form}
+        <p class="note">돈 계산의 원본은 핸드SOS입니다. 여기 숫자는 시술 중에 보려고 옮겨 적는 것입니다.</p>
+        ${sum.count === 0 ? '' : `
+          <details class="pass-list" ${passOpen ? 'open' : ''}>
+            <summary>내역 ${sum.count}건 · 넣은 돈 ${won(sum.charged)} · 쓴 돈 ${won(sum.used)}</summary>
+            ${list.map((e) => `
+              <div class="pass-row">
+                <span class="when">${fmt(e.at)}</span>
+                <span class="kind ${e.kind}">${e.kind === 'charge' ? '충전' : '사용'}</span>
+                <span class="won ${e.kind}">${e.kind === 'charge' ? '+' : '-'}${won(e.amount)}</span>
+                <span class="memo">${esc(e.note)}</span>
+                <button type="button" class="link danger" data-action="pass-del" data-id="${e.id}">지우기</button>
+              </div>`).join('')}
+          </details>`}
+      </div>`;
   }
 
   // 며칠 만의 방문인지 한 줄로. 아직 온 적이 없으면 '첫 방문'.
@@ -103,6 +144,7 @@
           </div>
           <div class="right">
             <span class="status ${t.recorded ? 'done' : 'todo'}">${t.recorded ? '기록 남김' : '아직 안 적음'}</span>
+            ${t.balance > 0 ? `<span class="status pass">정액권 ${Store.formatWon(t.balance)}</span>` : ''}
             <button type="button" class="link small" data-drop="${t.customer.id}">명단에서 빼기</button>
           </div>
         </div>`).join('');
@@ -159,6 +201,7 @@
     return `
       ${renderIdentity(c, visits.length)}
       <div class="cycle big">${cycleText(Store.visitCycle(state, c.id, today()))}</div>
+      ${renderPass(c)}
       ${renderProfile(c)}
       ${latestNext ? `<div class="next-big"><b>지난번에 다음에 하기로 한 것</b><p>${esc(latestNext)}</p></div>` : ''}
       <form id="visit-form">
@@ -166,6 +209,9 @@
         <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
         <label>다음에 하기로 한 방향 (비워도 됨)</label>
         <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담"></textarea>
+        ${Store.passBalance(state, c.id) > 0 ? `
+          <label>정액권에서 차감 (비워도 됨) · 잔액 ${Store.formatWon(Store.passBalance(state, c.id))}</label>
+          <input type="text" id="visit-deduct" inputmode="numeric" placeholder="예: 50000" autocomplete="off" style="max-width:220px">` : ''}
         <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
       </form>
       <h3>지난 방문</h3>
@@ -343,10 +389,31 @@
         commit(Store.setProfile(state, view.id, { talk: $('#profile-talk').value, hair: $('#profile-hair').value }, now()).state);
         editingProfile = false; render();
       }
+      else if (a === 'pass-charge' || a === 'pass-use') {
+        passForm = a === 'pass-charge' ? 'charge' : 'use'; render(); $('#pass-amount').focus();
+      }
+      else if (a === 'pass-cancel') { passForm = null; render(); }
+      else if (a === 'pass-save') {
+        const fields = { amount: $('#pass-amount').value, note: $('#pass-note').value };
+        const put = passForm === 'charge' ? Store.chargePass : Store.usePass;
+        commit(put(state, view.id, fields, now()).state);
+        passForm = null; passOpen = true; render();
+      }
+      else if (a === 'pass-del') {
+        const e = Store.passEntriesOf(state, view.id).find((x) => x.id === Number(btn.dataset.id));
+        const label = `${e.kind === 'charge' ? '충전' : '사용'} ${e.kind === 'charge' ? '+' : '-'}${Store.formatWon(e.amount)}`;
+        if (!confirm(`${fmt(e.at)} 정액권 내역을 지웁니다.\n\n${label}${e.note ? ' · ' + e.note : ''}\n\n지우면 잔액이 바로 바뀝니다. 되돌릴 수 없습니다.\n\n지울까요?`)) return;
+        commit(Store.deletePass(state, e.id).state);
+        passOpen = true; render();
+      }
       else if (a === 'del-visit') {
         const v = Store.visitsOf(state, view.id).find((x) => x.id === Number(btn.dataset.id));
         const head = v.done.length > 40 ? v.done.slice(0, 40) + '…' : v.done;
-        if (!confirm(`${fmt(v.createdAt)} 방문 기록을 지웁니다.\n\n${head}\n\n[지난 방문] 아래 [지운 기록]에서 되살릴 수 있습니다.\n\n지울까요?`)) return;
+        const linked = Store.passEntriesOf(state, view.id).filter((x) => x.visitId === v.id);
+        const note = linked.length
+          ? `\n\n이 방문과 함께 넣은 정액권 차감 ${Store.formatWon(linked.reduce((n, x) => n + x.amount, 0))}은 그대로 남습니다.\n필요하면 정액권 내역에서 따로 지우세요.`
+          : '';
+        if (!confirm(`${fmt(v.createdAt)} 방문 기록을 지웁니다.\n\n${head}${note}\n\n[지난 방문] 아래 [지운 기록]에서 되살릴 수 있습니다.\n\n지울까요?`)) return;
         commit(Store.deleteVisit(state, v.id, now()).state);
         visitTrashOpen = true; editingVisitId = null; render();
       }
@@ -368,7 +435,7 @@
         commit(Store.editVisit(state, Number(btn.dataset.id), { done: $('#edit-done').value, next: $('#edit-next').value }, now()).state);
         editingVisitId = null; render();
       }
-    } catch (err) { showMsg($('#identity-msg') || $('#edit-msg') || $('#profile-msg') || $('#visit-trash-msg'), err.message, 'error'); }
+    } catch (err) { showMsg($('#pass-msg') || $('#identity-msg') || $('#edit-msg') || $('#profile-msg') || $('#visit-trash-msg'), err.message, 'error'); }
   });
 
   $('#trash').addEventListener('click', (e) => {
@@ -401,6 +468,7 @@
 
   $('#card').addEventListener('click', (e) => {
     if (e.target.closest('details.trash summary')) visitTrashOpen = !visitTrashOpen;
+    if (e.target.closest('details.pass-list summary')) passOpen = !passOpen;
   });
 
   $('#card').addEventListener('input', (e) => {
@@ -434,9 +502,15 @@
     if (e.target.id !== 'visit-form') return;
     e.preventDefault();
     try {
-      commit(Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value }, now()).state);
+      const t = now();
+      const deduct = ($('#visit-deduct')?.value ?? '').trim();
+      const made = Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value }, t);
+      const next = deduct
+        ? Store.usePass(made.state, view.id, { amount: deduct, note: '방문 기록과 함께', visitId: made.visit.id }, t).state
+        : made.state;
+      commit(next);
       render();
-      showMsg($('#visit-msg'), '저장했습니다', 'ok');
+      showMsg($('#visit-msg'), deduct ? `저장했습니다 · 정액권 잔액 ${Store.formatWon(Store.passBalance(state, view.id))}` : '저장했습니다', 'ok');
     } catch (err) { showMsg($('#visit-msg'), err.message, 'error'); }
   });
 
