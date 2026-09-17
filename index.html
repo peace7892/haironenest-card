@@ -40,6 +40,12 @@
   .profile .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .profile .item b { display: block; font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
   .profile .item p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
+  .last-visit { background: var(--accent-bg); border-radius: 10px; padding: 10px 14px; margin: 6px 0 14px; }
+  .last-visit b { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--accent); font-weight: 600; }
+  .last-visit b small { color: var(--muted); font-weight: normal; }
+  .last-visit p { margin: 4px 0 0; white-space: pre-wrap; line-height: 1.5; font-size: 16px; }
+  .last-visit p.next { color: var(--muted); font-size: 14px; }
+  .last-visit.empty-last { color: var(--muted); font-size: 14px; background: var(--bg); border: 1px dashed var(--line); }
   .next-big { background: var(--accent-bg); border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; }
   .next-big b { display: block; font-size: 13px; color: var(--accent); margin-bottom: 4px; }
   .next-big p { margin: 0; white-space: pre-wrap; line-height: 1.5; font-size: 17px; }

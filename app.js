@@ -334,15 +334,20 @@
   // ---- 오른쪽: 고객 카드 ---------------------------------------------------
   function renderCard(c) {
     const visits = Store.visitsWithGaps(state, c.id);
-    const latestNext = visits.find((v) => v.next)?.next;
+    const last = visits[0] ?? null; // 가장 최근 방문
+    const lastNext = visits.find((v) => v.next)?.next;
+    const lastBlock = !last ? '<div class="last-visit empty-last">아직 방문 기록이 없는 고객입니다. 오늘이 첫 기록입니다.</div>' : `
+      <div class="last-visit">
+        <b>지난 시술 <small>${fmt(last.createdAt).slice(0, 10)}${last.sincePrev === null && visits.length === 1 ? '' : ''} · ${cycleText(Store.visitCycle(state, c.id, today())).split(' · ')[0]}</small>
+          ${(last.kinds ?? []).length ? `<span class="kinds-inline">${last.kinds.map((k) => `<span>${esc(k)}</span>`).join('')}</span>` : ''}</b>
+        <p>${esc(last.done)}</p>
+        ${lastNext ? `<p class="next">다음 방향: ${esc(lastNext)}</p>` : ''}
+      </div>`;
     return `
       ${renderIdentity(c, visits.length)}
-      <div class="cycle big">${cycleText(Store.visitCycle(state, c.id, today()))}</div>
-      ${renderPass(c)}
-      ${renderProfile(c)}
-      ${latestNext ? `<div class="next-big"><b>지난번에 다음에 하기로 한 것</b><p>${esc(latestNext)}</p></div>` : ''}
+      ${lastBlock}
       <form id="visit-form">
-        <label>오늘 시술 내용과 그 이유 (필수)</label>
+        <label style="margin-top:4px">오늘 시술 내용과 그 이유 (필수)</label>
         <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
         <label>시술 종류 (여러 개 가능, 안 골라도 됨)</label>
         ${renderChips('visit-kind', [])}
@@ -350,6 +355,9 @@
         <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담"></textarea>
           <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
       </form>
+      <div class="cycle big">${cycleText(Store.visitCycle(state, c.id, today()))}</div>
+      ${renderProfile(c)}
+      ${renderPass(c)}
       ${renderNotice(c)}
       <h3>지난 방문</h3>
       ${visits.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : visits.map(renderVisit).join('')}
