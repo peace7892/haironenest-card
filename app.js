@@ -821,18 +821,18 @@
     const text = await file.text();
     const loaded = Store.deserialize(text);
     const summary = (st) => `고객 ${st.customers.length}명 · 방문 기록 ${st.visits.length}건 · 정액권 잔액 합계 ${Store.formatWon(st.customers.reduce((a, c) => a + Store.passBalance(st, c.id), 0))}`;
-    if (loaded.customers.length === 0 && state.customers.length > 0 && !confirm('불러올 파일에 고객이 없습니다. 지금 기록을 비우고 이 파일로 바꿀까요?')) { e.target.value = ''; return; }
-    if (state.customers.length > 0 && !confirm(`지금 서버 기록(${summary(state)})을\n이 파일의 내용(${summary(loaded)})으로 통째로 바꿉니다.\n\n계속할까요?`)) { e.target.value = ''; return; }
+    if (loaded.customers.length === 0 && state.customers.length > 0 && !confirm('이 백업 파일에는 고객이 없습니다. 지금 서버 기록을 비우고 이 파일로 되돌릴까요?')) { e.target.value = ''; return; }
+    if (state.customers.length > 0 && !confirm(`지금 서버 기록(${summary(state)})을\n이 백업 파일의 내용(${summary(loaded)})으로 통째로 되돌립니다.\n지금 기록 중 백업 이후에 적은 것은 사라집니다.\n\n계속할까요?`)) { e.target.value = ''; return; }
     e.target.value = '';
-    showSync('서버로 옮기는 중…');
+    showSync('백업 파일로 되돌리는 중…');
     try {
       const cleaned = Store.sweepDeletedVisits(loaded, now()).state;
       await storage.replaceAll(cleaned);
       state = await storage.load(today());
       view = { kind: 'today' }; render();
       showSync('');
-      alert(`옮겼습니다.\n\n파일: ${summary(cleaned)}\n서버: ${summary(state)}\n\n두 줄이 같으면 잘 옮겨진 것입니다.`);
-    } catch (err) { showSync(`옮기기 실패: ${err.message}`, 'error'); }
+      alert(`되돌렸습니다.\n\n백업 파일: ${summary(cleaned)}\n서버: ${summary(state)}\n\n두 줄이 같으면 잘 된 것입니다.`);
+    } catch (err) { showSync(`되돌리기 실패: ${err.message}`, 'error'); }
   });
 
   // ---- 시작: 로그인 → 서버에서 읽기 → 그리기 -------------------------------
