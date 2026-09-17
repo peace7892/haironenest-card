@@ -1,8 +1,10 @@
 // 화면 연결. 규칙은 전부 store.js에 있고, 여기서는 그리기와 이벤트만 다룬다.
 (() => {
   const KEY = 'haironenest-card:v1';
-  let state = Store.deserialize(localStorage.getItem(KEY));
-  let view = { kind: 'today' }; // { kind: 'today' } | { kind: 'card', id }
+  // ?local=1 이면 서버 대신 이 브라우저 저장소를 쓴다 (시험용·비상용).
+  const USE_LOCAL = new URLSearchParams(location.search).has('local');
+  let state = Store.createState();
+  let view = { kind: 'today' }; // { kind: 'today' } | { kind: 'card', id } | { kind: 'monthly', month }
   let editingVisitId = null;
   let editingProfile = false;
   let editingIdentity = false;
@@ -20,10 +22,27 @@
   const esc = (s) => (s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const customerOf = (id) => state.customers.find((c) => c.id === id);
 
+  // ---- 저장소: 서버(DB) 또는 브라우저(Local) — 같은 모양 ------------------
+  const Local = {
+    async session() { return true; },
+    async login() {}, async logout() {},
+    async load() { return Store.deserialize(localStorage.getItem(KEY)); },
+    async save(prev, next) { localStorage.setItem(KEY, Store.serialize(next)); },
+    async replaceAll(next) { localStorage.setItem(KEY, Store.serialize(next)); },
+  };
+  const storage = USE_LOCAL ? Local : DB;
+  let pendingSaves = 0;
+  function showSync(text, kind) { const el = $('#sync'); el.textContent = text; el.className = `sync ${kind ?? ''}`; el.hidden = !text; }
+
   function commit(next) {
+    const prev = state;
     state = next;
-    localStorage.setItem(KEY, Store.serialize(state));
+    pendingSaves += 1; showSync('저장 중…');
+    storage.save(prev, next)
+      .then(() => { pendingSaves -= 1; if (pendingSaves === 0) showSync(''); })
+      .catch((err) => { pendingSaves -= 1; showSync(`서버 저장 실패: ${err.message} — 인터넷을 확인하고 새로고침하세요`, 'error'); });
   }
+  const isEditing = () => editingVisitId !== null || editingProfile || editingIdentity || passForm !== null || noticeOpen;
   function showMsg(el, text, kind) { if (el) { el.textContent = text; el.className = `msg ${kind}`; } }
   function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; passForm = null; passOpen = false; noticeOpen = false; commit(Store.markToday(state, id, today()).state); render(); }
 
@@ -259,6 +278,7 @@
           </div>
         </div>`).join('');
     return `
+      ${renderDashLine()}
       <h2 class="card-title">오늘 <small>${today().replace(/-/g, '.')} · ${list.length}명 중 ${done}명 기록 남김</small></h2>
       <div class="add-today">
         <div class="row">
@@ -268,7 +288,8 @@
         <div id="add-hits"></div>
       </div>
       <div class="msg" id="today-msg"></div>
-      ${items}`;
+      ${items}
+      ${renderClosing()}`;
   }
 
   // 이름을 칠 때마다 후보만 다시 그린다. 화면 전체를 다시 그리면 글자를 치던 자리가 날아간다.
@@ -317,6 +338,8 @@
       <form id="visit-form">
         <label>오늘 시술 내용과 그 이유 (필수)</label>
         <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
+        <label>시술 종류 (여러 개 가능, 안 골라도 됨)</label>
+        ${renderChips('visit-kind', [])}
         <label>다음에 하기로 한 방향 (비워도 됨)</label>
         <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담"></textarea>
           <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
@@ -357,6 +380,7 @@
           <div><label style="margin-top:0">이름</label><input type="text" id="id-name" value="${esc(c.name)}"></div>
           <div><label style="margin-top:0">전화번호</label><input type="text" id="id-phone" inputmode="tel" value="${esc(fmtPhone(c.phone))}" placeholder="010-1234-5678"></div>
           <div><label style="margin-top:0">소개해 준 분</label><input type="text" id="id-referrer" value="${esc(c.referrer)}" placeholder="없으면 비움"></div>
+          <label style="margin:0;display:flex;gap:6px;align-items:center;font-size:14px;align-self:center"><input type="checkbox" id="id-legacy" ${c.isLegacy ? 'checked' : ''}> 예전부터 오던 고객</label>
           <button type="button" class="secondary" data-action="cancel-identity">취소</button>
           <button type="button" data-action="save-identity">저장</button>
         </div>
@@ -369,7 +393,7 @@
     return `
       <h2 class="card-title">${esc(c.name)} <small>${phoneText} · 지난 방문 ${visitCount}건</small>
         <button type="button" class="link" data-action="edit-identity">이름·번호·소개 고치기</button></h2>
-      <div class="referrer">${c.referrer ? '소개: ' + esc(c.referrer) : '<i>소개해 준 분 없음</i>'}</div>`;
+      <div class="referrer">${c.referrer ? '소개: ' + esc(c.referrer) : '<i>소개해 준 분 없음</i>'}${c.isLegacy ? ' · 예전부터 오던 고객' : ''}</div>`;
   }
 
   function renderProfile(c) {
@@ -401,12 +425,18 @@
       </div>`;
   }
 
+  function renderChips(name, selected) {
+    return `<div class="chips">${Store.KINDS.map((k) => `<label><input type="checkbox" name="${name}" value="${k}" ${selected.includes(k) ? 'checked' : ''}> ${k}</label>`).join('')}</div>`;
+  }
+  const readChips = (name) => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map((i) => i.value);
+
   function renderVisit(v) {
     if (v.id === editingVisitId) {
       return `
         <div class="visit">
           <div class="meta"><span>${fmt(v.createdAt)}</span><span>고치는 중</span></div>
           <label style="margin-top:0">오늘 시술 내용과 그 이유</label><textarea id="edit-done">${esc(v.done)}</textarea>
+          <label>시술 종류</label>${renderChips('edit-kind', v.kinds ?? [])}
           <label>다음에 하기로 한 방향</label><textarea id="edit-next" style="min-height:60px">${esc(v.next)}</textarea>
           <div class="row" style="margin-top:8px"><div class="msg" id="edit-msg"></div>
             <button type="button" class="secondary" data-action="cancel-edit">취소</button>
@@ -424,7 +454,7 @@
             <button type="button" class="link" data-action="edit" data-id="${v.id}">고치기</button>
             <button type="button" class="link danger" data-action="del-visit" data-id="${v.id}">지우기</button>
           </span></div>
-        <div class="field"><b>시술 내용과 이유</b><p>${esc(v.done)}</p></div>
+        <div class="field"><b>시술 내용과 이유${(v.kinds ?? []).length ? `<span class="kinds-inline">${v.kinds.map((k) => `<span>${esc(k)}</span>`).join('')}</span>` : ''}</b><p>${esc(v.done)}</p></div>
         ${v.next ? `<div class="field"><b>다음 방향</b><p>${esc(v.next)}</p></div>` : ''}
         ${history}
       </div>`;
@@ -442,12 +472,101 @@
     renderCustomers();
     renderTrash();
     const card = $('#card');
+    $('#nav-today').classList.toggle('active', view.kind === 'today');
+    $('#nav-monthly').classList.toggle('active', view.kind === 'monthly');
     if (view.kind === 'card' && customerOf(view.id)) { card.innerHTML = renderCard(customerOf(view.id)); setupNotice(); }
+    else if (view.kind === 'monthly') { card.innerHTML = renderMonthly(view.month ?? today().slice(0, 7)); }
     else { view = { kind: 'today' }; card.innerHTML = renderToday(); renderAddHits(); }
+  }
+
+  // ---- 대시보드 -----------------------------------------------------------
+  const monthLabel = (m) => `${m.slice(0, 4)}년 ${Number(m.slice(5, 7))}월`;
+  const prevMonth = (m) => { const d = new Date(m + '-01T00:00:00'); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+  const nextMonth = (m) => { const d = new Date(m + '-01T00:00:00'); d.setMonth(d.getMonth() + 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+  const topKind = (kinds) => { const e = Object.entries(kinds).filter(([k]) => k !== '미분류').sort((a, b) => b[1] - a[1])[0]; return e && e[1] > 0 ? `${e[0]} ${e[1]}` : '—'; };
+
+  // 오늘 화면 맨 위 한 줄. 누르면 월별로 간다.
+  function renderDashLine() {
+    const m = Store.monthlyStats(state, today().slice(0, 7));
+    const w = Store.weeklyRecordRate(state, today());
+    const rate = w.handsos ? `${w.recorded}/${w.handsos}` : `${w.recorded}건`;
+    return `
+      <div class="dash">
+        <div class="tile" data-monthly="1"><b>이번 달 신규</b><span>${m.newCustomers}</span><small>명</small></div>
+        <div class="tile" data-monthly="1"><b>이번 달 재방문</b><span>${m.returning}</span><small>명 · 방문 ${m.visits}건</small></div>
+        <div class="tile" data-monthly="1"><b>가장 많이 한 시술</b><span style="font-size:17px">${esc(topKind(m.kinds))}</span></div>
+        <div class="tile" data-monthly="1"><b>이번 주 기록</b><span>${rate}</span><small>${w.handsos ? '카드/핸드SOS' : '핸드SOS 인원 미입력'}</small></div>
+      </div>`;
+  }
+
+  // 퇴근 때 적는 핸드SOS 오늘 시술 인원
+  function renderClosing() {
+    const n = Store.dailyCount(state, today());
+    return `
+      <div class="closing">
+        <b style="font-size:14px;color:var(--muted)">퇴근 때</b>
+        <span>핸드SOS 오늘 시술 인원</span>
+        <input type="number" id="handsos-count" min="0" value="${n ?? ''}" placeholder="명">
+        <button type="button" class="small secondary" data-action="save-count">저장</button>
+        <span class="msg" id="count-msg" style="margin:0">${n === null ? '' : `${n}명 적어 둠`}</span>
+      </div>`;
+  }
+
+  function renderMonthly(month) {
+    const m = Store.monthlyStats(state, month);
+    const p = Store.monthlyStats(state, prevMonth(month));
+    const cell = (a, b) => `<td class="num">${a}</td><td class="num" style="color:var(--muted)">${b}</td>`;
+    const kindsRows = Object.entries(m.kinds).map(([k, n]) => `<tr><td>${esc(k)}</td>${cell(n, p.kinds[k] ?? 0)}</tr>`).join('');
+    const ret = Store.retention(state, { days: state.settings.retentionDays ?? 150, today: today() });
+    const over = Store.overdueCustomers(state, today(), state.settings.overdueFactor ?? 1.5);
+    const isFuture = month >= today().slice(0, 7);
+    return `
+      <div class="monthly">
+        <h2 class="card-title">월별 <small>기록은 매일 쌓이고, 여기서는 달 단위로 봅니다</small></h2>
+        <div class="month-pick">
+          <button type="button" class="small secondary" data-month="${prevMonth(month)}">◀</button>
+          <b style="font-size:18px">${monthLabel(month)}</b>
+          <button type="button" class="small secondary" data-month="${nextMonth(month)}" ${isFuture ? 'disabled' : ''}>▶</button>
+          <span style="color:var(--muted);font-size:13px;margin-left:6px">오른쪽 회색 숫자는 지난달(${monthLabel(prevMonth(month))})</span>
+        </div>
+        <h3>이 달</h3>
+        <table>
+          <tr><th>항목</th><th style="text-align:right">이 달</th><th style="text-align:right">지난달</th></tr>
+          <tr><td>방문 건수 (실제로 한 시술 횟수)</td>${cell(m.visits, p.visits)}</tr>
+          <tr><td>방문 고객 수 (한 번이라도 온 사람)</td>${cell(m.customers, p.customers)}</tr>
+          <tr><td>&nbsp;&nbsp;신규 고객</td>${cell(m.newCustomers, p.newCustomers)}</tr>
+          <tr><td>&nbsp;&nbsp;재방문 고객</td>${cell(m.returning, p.returning)}</tr>
+          <tr><td>1인당 방문 횟수</td>${cell(m.perCustomer, p.perCustomer)}</tr>
+          <tr><td>재방문 고객 비율 (그 달 구성)</td>${cell(Math.round(m.returningRatio * 100) + '%', Math.round(p.returningRatio * 100) + '%')}</tr>
+        </table>
+        <h3>시술별 카운팅 (건수)</h3>
+        <table><tr><th>시술</th><th style="text-align:right">이 달</th><th style="text-align:right">지난달</th></tr>${kindsRows}</table>
+        <h3>회차 분포 (이 달 온 고객이 몇 번째 방문인지)</h3>
+        <table>
+          <tr><th>회차</th><th style="text-align:right">이 달</th><th style="text-align:right">지난달</th></tr>
+          <tr><td>1회차 (처음)</td>${cell(m.rounds.first, p.rounds.first)}</tr>
+          <tr><td>2~3회차</td>${cell(m.rounds.two3, p.rounds.two3)}</tr>
+          <tr><td>4회차 이상 (단골)</td>${cell(m.rounds.fourPlus, p.rounds.fourPlus)}</tr>
+          <tr><td>예전부터 오던 고객</td>${cell(m.rounds.legacy, p.rounds.legacy)}</tr>
+        </table>
+        <h3>신규 정착률 <small style="font-weight:normal;color:var(--muted)">처음 온 달별로, ${state.settings.retentionDays ?? 150}일 안에 두 번째 방문한 비율</small></h3>
+        ${ret.length === 0 ? '<div class="empty">아직 신규 고객 기록이 없습니다.</div>' : `<table>
+          <tr><th>처음 온 달</th><th style="text-align:right">신규</th><th style="text-align:right">돌아옴</th><th style="text-align:right">정착률</th><th>상태</th></tr>
+          ${ret.slice().reverse().map((r) => `<tr><td>${monthLabel(r.month)}</td><td class="num">${r.total}</td><td class="num">${r.returned}</td><td class="num">${Math.round(r.rate * 100)}%</td><td style="color:var(--muted)">${r.pending ? '집계 중' : '확정'}</td></tr>`).join('')}
+        </table>`}
+        <h3>평소 주기보다 오래 안 온 고객 <small style="font-weight:normal;color:var(--muted)">평소 주기의 ${state.settings.overdueFactor ?? 1.5}배를 넘김 · ${over.length}명</small></h3>
+        ${over.length === 0 ? '<div class="empty">지금은 없습니다.</div>' : `<table>
+          <tr><th>고객</th><th style="text-align:right">지난 방문</th><th style="text-align:right">평소 주기</th><th style="text-align:right">지난 지</th></tr>
+          ${over.map((o) => `<tr style="cursor:pointer" data-open="${o.customer.id}"><td>${esc(o.customer.name)} <small style="color:var(--muted)">${esc(Store.maskPhone(o.customer.phone))}</small></td><td class="num">${o.lastDate.replace(/-/g, '.')}</td><td class="num">${o.average}일</td><td class="num">${o.sinceLast}일</td></tr>`).join('')}
+        </table>`}
+      </div>`;
   }
 
   // ---- 이벤트 --------------------------------------------------------------
   $('#home').addEventListener('click', () => { view = { kind: 'today' }; render(); });
+  $('#nav-today').addEventListener('click', () => { view = { kind: 'today' }; render(); });
+  $('#nav-monthly').addEventListener('click', () => { view = { kind: 'monthly', month: today().slice(0, 7) }; render(); });
+  $('#logout').addEventListener('click', async () => { await storage.logout(); location.reload(); });
   $('#search').addEventListener('input', renderCustomers);
 
   $('#customer-list').addEventListener('click', (e) => {
@@ -460,9 +579,9 @@
   $('#new-customer-form').addEventListener('submit', (e) => {
     e.preventDefault();
     try {
-      const { state: next, customer } = Store.addCustomer(state, { name: $('#new-name').value, phone: $('#new-phone').value, referrer: $('#new-referrer').value });
+      const { state: next, customer } = Store.addCustomer(state, { name: $('#new-name').value, phone: $('#new-phone').value, referrer: $('#new-referrer').value, isLegacy: $('#new-legacy').checked });
       commit(next);
-      $('#new-name').value = ''; $('#new-phone').value = ''; $('#new-referrer').value = ''; $('#search').value = '';
+      $('#new-name').value = ''; $('#new-phone').value = ''; $('#new-referrer').value = ''; $('#new-legacy').checked = false; $('#search').value = '';
       showMsg($('#new-msg'), `${customer.name} 카드를 만들었습니다`, 'ok');
       openCard(customer.id);
       editingProfile = true; render();
@@ -482,14 +601,26 @@
 
     const open = e.target.closest('[data-open]');
     if (open) { openCard(Number(open.dataset.open)); return; }
+    if (e.target.closest('[data-monthly]')) { view = { kind: 'monthly', month: today().slice(0, 7) }; render(); return; }
+    const mv = e.target.closest('button[data-month]');
+    if (mv) { view = { kind: 'monthly', month: mv.dataset.month }; render(); return; }
     const btn = e.target.closest('button[data-action]');
+    if (btn && btn.dataset.action === 'save-count') {
+      try {
+        const v = $('#handsos-count').value;
+        if (v === '') { showMsg($('#count-msg'), '인원을 적으세요', 'error'); return; }
+        commit(Store.setDailyCount(state, today(), Number(v)).state);
+        render(); showMsg($('#count-msg'), `${v}명 적어 둠`, 'ok');
+      } catch (err) { showMsg($('#count-msg'), err.message, 'error'); }
+      return;
+    }
     if (!btn || view.kind !== 'card') return;
     const a = btn.dataset.action;
     try {
       if (a === 'edit-identity') { editingIdentity = true; render(); $('#id-name').focus(); }
       else if (a === 'cancel-identity') { editingIdentity = false; render(); }
       else if (a === 'save-identity') {
-        commit(Store.editCustomer(state, view.id, { name: $('#id-name').value, phone: $('#id-phone').value, referrer: $('#id-referrer').value }).state);
+        commit(Store.editCustomer(state, view.id, { name: $('#id-name').value, phone: $('#id-phone').value, referrer: $('#id-referrer').value, isLegacy: $('#id-legacy').checked }).state);
         editingIdentity = false; render();
       }
       else if (a === 'delete-customer') {
@@ -590,7 +721,7 @@
       else if (a === 'edit') { editingVisitId = Number(btn.dataset.id); render(); $('#edit-done').focus(); }
       else if (a === 'cancel-edit') { editingVisitId = null; render(); }
       else if (a === 'save-edit') {
-        commit(Store.editVisit(state, Number(btn.dataset.id), { done: $('#edit-done').value, next: $('#edit-next').value }, now()).state);
+        commit(Store.editVisit(state, Number(btn.dataset.id), { done: $('#edit-done').value, next: $('#edit-next').value, kinds: readChips('edit-kind') }, now()).state);
         editingVisitId = null; render();
       }
     } catch (err) { showMsg($('#pass-msg') || $('#identity-msg') || $('#edit-msg') || $('#profile-msg') || $('#visit-trash-msg'), err.message, 'error'); }
@@ -692,7 +823,7 @@
     if (e.target.id !== 'visit-form') return;
     e.preventDefault();
     try {
-      commit(Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value }, now()).state);
+      commit(Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value, kinds: readChips('visit-kind') }, now()).state);
       render();
       showMsg($('#visit-msg'), '저장했습니다', 'ok');
     } catch (err) { showMsg($('#visit-msg'), err.message, 'error'); }
@@ -713,17 +844,49 @@
     if (!file) return;
     const text = await file.text();
     const loaded = Store.deserialize(text);
+    const summary = (st) => `고객 ${st.customers.length}명 · 방문 기록 ${st.visits.length}건 · 정액권 잔액 합계 ${Store.formatWon(st.customers.reduce((a, c) => a + Store.passBalance(st, c.id), 0))}`;
     if (loaded.customers.length === 0 && state.customers.length > 0 && !confirm('불러올 파일에 고객이 없습니다. 지금 기록을 비우고 이 파일로 바꿀까요?')) { e.target.value = ''; return; }
-    if (state.customers.length > 0 && !confirm(`지금 기록(고객 ${state.customers.length}명)을 이 파일의 내용(고객 ${loaded.customers.length}명)으로 바꿉니다. 계속할까요?`)) { e.target.value = ''; return; }
-    commit(Store.sweepDeletedVisits(loaded, now()).state);
-    view = { kind: 'today' };
-    render();
+    if (state.customers.length > 0 && !confirm(`지금 서버 기록(${summary(state)})을\n이 파일의 내용(${summary(loaded)})으로 통째로 바꿉니다.\n\n계속할까요?`)) { e.target.value = ''; return; }
     e.target.value = '';
+    showSync('서버로 옮기는 중…');
+    try {
+      const cleaned = Store.sweepDeletedVisits(loaded, now()).state;
+      await storage.replaceAll(cleaned);
+      state = await storage.load(today());
+      view = { kind: 'today' }; render();
+      showSync('');
+      alert(`옮겼습니다.\n\n파일: ${summary(cleaned)}\n서버: ${summary(state)}\n\n두 줄이 같으면 잘 옮겨진 것입니다.`);
+    } catch (err) { showSync(`옮기기 실패: ${err.message}`, 'error'); }
   });
 
-  // 앱을 열 때 한 번: 지운 지 일주일이 지난 방문 기록을 치운다.
-  const swept = Store.sweepDeletedVisits(state, now());
-  if (swept.removed > 0) commit(swept.state);
-
-  render();
+  // ---- 시작: 로그인 → 서버에서 읽기 → 그리기 -------------------------------
+  async function boot() {
+    if (USE_LOCAL) { $('#subtitle').textContent = '시험 모드 · 이 브라우저에만 저장됩니다'; $('#logout').hidden = true; }
+    else DB.init(CONFIG, window.supabase);
+    if (!(await storage.session())) { $('#login').hidden = false; $('#login-password').focus(); return; }
+    await start();
+  }
+  async function start() {
+    $('#login').hidden = true;
+    showSync('불러오는 중…');
+    try {
+      state = await storage.load(today());
+      showSync('');
+    } catch (err) { showSync(`불러오기 실패: ${err.message}`, 'error'); return; }
+    // 지운 지 일주일이 지난 방문 기록을 치운다.
+    const swept = Store.sweepDeletedVisits(state, now());
+    if (swept.removed > 0) commit(swept.state);
+    render();
+  }
+  $('#login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await storage.login(CONFIG.LOGIN_EMAIL, $('#login-password').value); await start(); }
+    catch (err) { showMsg($('#login-msg'), err.message, 'error'); }
+  });
+  // 다른 컴퓨터에서 고친 뒤 이 창을 다시 잡으면 서버에서 다시 읽는다 (고치는 중이면 건너뜀).
+  window.addEventListener('focus', async () => {
+    if (USE_LOCAL || $('#login').hidden === false || isEditing() || pendingSaves > 0) return;
+    try { const fresh = await storage.load(today()); state = fresh; render(); } catch {}
+  });
+  boot();
 })();

@@ -121,15 +121,49 @@
   .notice-total b.short { color: var(--danger); }
   .preview { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 14px; line-height: 1.65; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 14px 15px; margin: 12px 0 0; max-height: 340px; overflow-y: auto; }
   input.won { text-align: right; font-variant-numeric: tabular-nums; }
+  /* V2 */
+  [hidden] { display: none !important; }
+  .login { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .login form { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 28px 28px 22px; width: 340px; display: grid; gap: 10px; }
+  .login h2 { margin: 0 0 6px; font-size: 18px; }
+  .login input { font-size: 18px; letter-spacing: 2px; }
+  .dash { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0 0 14px; }
+  .dash .tile { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+  .dash .tile b { display: block; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .dash .tile span { font-size: 22px; }
+  .dash .tile small { color: var(--muted); font-size: 12px; margin-left: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+  .chips label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; cursor: pointer; background: #fff; }
+  .chips label:has(input:checked) { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+  .chips input { margin: 0; }
+  .kinds-inline { display: inline-flex; gap: 4px; margin-left: 6px; }
+  .kinds-inline span { font-size: 12px; padding: 1px 7px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); }
+  .closing { background: #fff; border: 1px dashed var(--line); border-radius: 10px; padding: 10px 14px; margin-top: 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .closing input[type=number] { width: 90px; }
+  .monthly h3 { margin-top: 20px; }
+  .monthly table { border-collapse: collapse; width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .monthly th, .monthly td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; font-size: 15px; }
+  .monthly th { color: var(--muted); font-weight: 600; font-size: 13px; background: var(--bg); }
+  .monthly td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .month-pick { display: flex; align-items: center; gap: 8px; }
+  .sync { position: fixed; right: 14px; bottom: 12px; font-size: 13px; color: var(--muted); background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+  .sync.error { color: var(--danger); border-color: var(--danger); }
+  header .nav { display: flex; gap: 6px; margin-right: 8px; }
+  header .nav button.active { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
 <header>
   <h1 id="home">헤어원네스트 상담 카드</h1>
-  <small>V1 · 이 컴퓨터 브라우저에만 저장됩니다 · 퇴근 때 [파일로 저장]</small>
+  <small id="subtitle">V2 · 서버에 저장됩니다 · 퇴근 때 [파일로 저장]으로 백업</small>
+  <div class="nav">
+    <button type="button" class="secondary small" id="nav-today">오늘</button>
+    <button type="button" class="secondary small" id="nav-monthly">월별</button>
+  </div>
   <div class="tools">
     <button type="button" class="secondary small" id="export">파일로 저장</button>
-    <button type="button" class="secondary small" id="import">파일에서 불러오기</button>
+    <button type="button" class="secondary small" id="import" title="매장 PC 백업 파일을 서버로 옮깁니다">파일에서 서버로 옮기기</button>
+    <button type="button" class="link small" id="logout">로그아웃</button>
     <input type="file" id="import-file" accept="application/json" hidden>
   </div>
 </header>
@@ -143,6 +177,7 @@
         <input type="text" id="new-name" placeholder="이름 (필수)" autocomplete="off">
         <input type="text" id="new-phone" placeholder="전화번호 (예: 010-1234-5678)" inputmode="tel" autocomplete="off">
         <input type="text" id="new-referrer" placeholder="소개해 준 분 (없으면 비움)" autocomplete="off">
+        <label style="margin:0;display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="new-legacy"> 예전부터 오던 고객 (신규로 세지 않음)</label>
         <button type="submit">만들기</button>
         <div class="msg" id="new-msg"></div>
       </form>
@@ -158,7 +193,20 @@
   <option value="매직C컬"></option><option value="매직셋팅펌"></option><option value="모발클리닉"></option>
   <option value="두피클리닉"></option><option value="헤어컨설팅"></option><option value="점판"></option>
 </datalist>
+<div class="login" id="login" hidden>
+  <form id="login-form">
+    <h2>헤어원네스트 상담 카드</h2>
+    <label style="margin-top:0">비밀번호</label>
+    <input type="password" id="login-password" autocomplete="current-password" autofocus>
+    <button type="submit">들어가기</button>
+    <div class="msg" id="login-msg"></div>
+  </form>
+</div>
+<div class="sync" id="sync" hidden></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
 <script src="store.js"></script>
+<script src="db.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
