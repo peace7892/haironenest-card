@@ -2,6 +2,7 @@
 -- 투두리스트 프로젝트를 같이 쓰므로 표 이름 앞에 card_ 를 붙인다.
 -- Supabase 관리 화면 → SQL Editor 에 이 파일 전체를 붙여넣고 Run.
 -- 다시 실행해도 안전하다 (create if not exists / drop policy 후 재생성).
+-- card_daily_counts 표는 처음 만들었다가 안 쓰기로 해서 뺐다 (서버에 남아 있어도 무해. 지우려면: drop table card_daily_counts;)
 
 create table if not exists card_customers (
   id bigint primary key,
@@ -47,12 +48,6 @@ create table if not exists card_today (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists card_daily_counts (
-  date text primary key,
-  handsos_count integer,                            -- 퇴근 때 적는 핸드SOS 오늘 시술 인원
-  updated_at timestamptz not null default now()
-);
-
 create table if not exists card_settings (
   id integer primary key default 1 check (id = 1),
   data jsonb not null default '{}',                 -- 안내문 머리말·맺음말, 정액권 상품, nextId, 정착 기준일, 주기 배수
@@ -64,19 +59,16 @@ alter table card_customers    enable row level security;
 alter table card_visits       enable row level security;
 alter table card_passes       enable row level security;
 alter table card_today        enable row level security;
-alter table card_daily_counts enable row level security;
 alter table card_settings     enable row level security;
 
 drop policy if exists "card_customers_auth"    on card_customers;
 drop policy if exists "card_visits_auth"       on card_visits;
 drop policy if exists "card_passes_auth"       on card_passes;
 drop policy if exists "card_today_auth"        on card_today;
-drop policy if exists "card_daily_counts_auth" on card_daily_counts;
 drop policy if exists "card_settings_auth"     on card_settings;
 
 create policy "card_customers_auth"    on card_customers    for all to authenticated using (true) with check (true);
 create policy "card_visits_auth"       on card_visits       for all to authenticated using (true) with check (true);
 create policy "card_passes_auth"       on card_passes       for all to authenticated using (true) with check (true);
 create policy "card_today_auth"        on card_today        for all to authenticated using (true) with check (true);
-create policy "card_daily_counts_auth" on card_daily_counts for all to authenticated using (true) with check (true);
 create policy "card_settings_auth"     on card_settings     for all to authenticated using (true) with check (true);

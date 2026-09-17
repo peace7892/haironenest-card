@@ -6,7 +6,7 @@ const Store = (() => {
   const KINDS = ['커트', '펌', '염색', '클리닉', '기타'];
 
   function createState() {
-    return { nextId: 1, customers: [], visits: [], passes: [], settings: defaultSettings(), today: { date: '', entries: [] }, dailyCounts: {} };
+    return { nextId: 1, customers: [], visits: [], passes: [], settings: defaultSettings(), today: { date: '', entries: [] } };
   }
 
   // ---- 고객 --------------------------------------------------------------
@@ -475,17 +475,7 @@ const Store = (() => {
     });
   }
 
-  // ---- V2: 핸드SOS 인원, 월별 집계, 정착률, 주기 초과, 주간 기록률 ----------
-
-  function setDailyCount(state, date, count) {
-    const n = Number(count);
-    if (!Number.isInteger(n) || n < 0) throw new Error('인원은 0 이상의 숫자로 적으세요');
-    return { state: { ...state, dailyCounts: { ...(state.dailyCounts ?? {}), [date]: n } } };
-  }
-  function dailyCount(state, date) {
-    const v = (state.dailyCounts ?? {})[date];
-    return Number.isInteger(v) ? v : null;
-  }
+  // ---- V2: 월별 집계, 정착률, 주기 초과 ----------------------------------
 
   const liveCustomers = (state) => state.customers.filter(c => !c.deletedAt);
   const ascVisits = (state, customerId) => [...visitsOf(state, customerId)].reverse(); // 오래된 것부터
@@ -555,24 +545,6 @@ const Store = (() => {
     return out.sort((a, b) => b.sinceLast - a.sinceLast);
   }
 
-  // 이번 주(월~일) 카드 기록 건수와 핸드SOS 인원 합
-  function weeklyRecordRate(state, today) {
-    const d = new Date(today + 'T00:00:00');
-    const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-    const from = iso(mon), to = iso(sun);
-    let recorded = 0;
-    for (const c of liveCustomers(state)) for (const v of visitsOf(state, c.id)) {
-      const day = v.createdAt.slice(0, 10);
-      if (day >= from && day <= to) recorded += 1;
-    }
-    let handsos = null;
-    for (const [day, n] of Object.entries(state.dailyCounts ?? {})) {
-      if (day >= from && day <= to && Number.isInteger(n)) handsos = (handsos ?? 0) + n;
-    }
-    return { from, to, recorded, handsos };
-  }
-
   // ---- 저장 ---------------------------------------------------------------
 
   function serialize(state) {
@@ -601,8 +573,7 @@ const Store = (() => {
     const settings = migrateSettings(p.settings);
     const passes = (p.passes ?? []).filter(x => x && typeof x.customerId === 'number' && (x.kind === 'charge' || x.kind === 'use'))
       .map(x => ({ id: x.id, customerId: x.customerId, kind: x.kind, amount: Number(x.amount) || 0, note: x.note ?? '', at: x.at ?? '', visitId: x.visitId ?? null }));
-    const dailyCounts = (p.dailyCounts && typeof p.dailyCounts === 'object' && !Array.isArray(p.dailyCounts)) ? p.dailyCounts : {};
-    return { nextId: p.nextId ?? 1, customers, visits, passes, settings, today, dailyCounts };
+    return { nextId: p.nextId ?? 1, customers, visits, passes, settings, today };
   }
 
   function migrateSettings(v) {
@@ -629,7 +600,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { KINDS, setDailyCount, dailyCount, monthlyStats, retention, overdueCustomers, weeklyRecordRate, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { KINDS, monthlyStats, retention, overdueCustomers, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

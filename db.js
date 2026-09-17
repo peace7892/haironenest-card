@@ -1,6 +1,6 @@
 // 서버 저장 층. 상태(state) 전체를 알고, 바뀐 줄만 Supabase 표에 넣고 뺀다.
 // 규칙(store.js)과 화면(app.js)은 서버를 모른다. 여기만 안다.
-// 표 6개: card_customers, card_visits, card_passes, card_today, card_daily_counts, card_settings
+// 표 5개: card_customers, card_visits, card_passes, card_today, card_settings
 const DB = (() => {
   let client = null;
 
@@ -41,9 +41,6 @@ const DB = (() => {
     if (next.today && next.today.date && !same(prev.today, next.today)) {
       ops.push({ table: 'card_today', upsert: [{ date: next.today.date, entries: next.today.entries ?? [] }] });
     }
-    const pc = prev.dailyCounts ?? {}, nc = next.dailyCounts ?? {};
-    const counts = Object.entries(nc).filter(([d, n]) => pc[d] !== n).map(([d, n]) => ({ date: d, handsos_count: n }));
-    if (counts.length) ops.push({ table: 'card_daily_counts', upsert: counts });
     if (!same(prev.settings, next.settings) || prev.nextId !== next.nextId) {
       ops.push({ table: 'card_settings', upsert: [{ id: 1, data: { ...(next.settings ?? {}), nextId: next.nextId } }] });
     }
@@ -60,12 +57,10 @@ const DB = (() => {
     const passes = (rows.card_passes ?? []).map(fromRow.passes);
     const maxId = Math.max(0, ...customers.map((x) => x.id), ...visits.map((x) => x.id), ...passes.map((x) => x.id));
     const todayRow = (rows.card_today ?? []).find((t) => t.date === todayDate);
-    const dailyCounts = Object.fromEntries((rows.card_daily_counts ?? []).filter((r) => Number.isInteger(r.handsos_count)).map((r) => [r.date, r.handsos_count]));
     const raw = {
       nextId: Math.max(Number.isInteger(nextIdSaved) ? nextIdSaved : 1, maxId + 1),
       customers, visits, passes, settings: data,
       today: todayRow ? { date: todayRow.date, entries: todayRow.entries ?? [] } : { date: '', entries: [] },
-      dailyCounts,
     };
     // 옛 데이터·빈 값은 store의 이전(migrate) 규칙으로 한 번 더 다듬는다.
     return Store.deserialize(JSON.stringify(raw));
@@ -94,7 +89,7 @@ const DB = (() => {
     return out;
   }
   async function load(todayDate) {
-    const names = ['card_customers', 'card_visits', 'card_passes', 'card_today', 'card_daily_counts', 'card_settings'];
+    const names = ['card_customers', 'card_visits', 'card_passes', 'card_today', 'card_settings'];
     const lists = await Promise.all(names.map(fetchAll));
     return assemble(Object.fromEntries(names.map((n, i) => [n, lists[i]])), todayDate);
   }
@@ -118,7 +113,7 @@ const DB = (() => {
       const { error } = await client.from(t).delete().gte('id', 0);
       if (error) throw new Error(`${t} 비우기 실패: ${error.message}`);
     }
-    for (const t of ['card_today', 'card_daily_counts']) {
+    for (const t of ['card_today']) {
       const { error } = await client.from(t).delete().neq('date', '');
       if (error) throw new Error(`${t} 비우기 실패: ${error.message}`);
     }

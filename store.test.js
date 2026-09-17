@@ -948,7 +948,7 @@ test('설정이 없던 옛 백업도 기본 문구로 열린다', () => {
 });
 
 // ---------------------------------------------------------------- V2: 대시보드 재료
-const { KINDS, setDailyCount, dailyCount, monthlyStats, retention, overdueCustomers, weeklyRecordRate } = require('./store.js');
+const { KINDS, monthlyStats, retention, overdueCustomers } = require('./store.js');
 
 function v2State() {
   // 9월: 김OO(신규, 9/5·9/19 두 번), 이OO(예전 고객, 9/10), 박OO(신규 9/12), 최OO(8월 신규, 9/15 재방문), 정OO(8/1 이후 안 옴, 평소 30일)
@@ -987,16 +987,6 @@ test('예전부터 오던 고객 체크는 만들 때와 고칠 때 둘 다 되�
   assert.equal(state.customers[0].isLegacy, false);
   const old = deserialize(JSON.stringify({ nextId: 2, customers: [{ id: 1, name: '김OO', phone: '01012345678' }], visits: [] }));
   assert.equal(old.customers[0].isLegacy, false);
-});
-
-test('핸드SOS 오늘 시술 인원을 날짜별로 적고 다시 읽는다', () => {
-  let s = createState();
-  ({ state: s } = setDailyCount(s, '2026-09-19', 8));
-  ({ state: s } = setDailyCount(s, '2026-09-19', 9));
-  assert.equal(dailyCount(s, '2026-09-19'), 9);
-  assert.equal(dailyCount(s, '2026-09-20'), null);
-  assert.throws(() => setDailyCount(s, '2026-09-19', -1), /인원/);
-  assert.deepEqual(deserialize(serialize(s)).dailyCounts, s.dailyCounts);
 });
 
 test('월별 집계: 방문 건수와 방문 고객 수를 따로, 신규+재방문=고객 수, 시술별·회차별', () => {
@@ -1042,11 +1032,3 @@ test('주기 초과 고객: 평소 주기의 1.5배를 넘긴 고객만, 방문�
   assert.deepEqual(overdueCustomers(s, '2026-08-20', 1.5), [], '8/20엔 19일이라 아직');
 });
 
-test('주간 기록률: 이번 주(월~일) 카드 기록 건수와 핸드SOS 인원 합', () => {
-  let { s } = v2State();
-  ({ state: s } = setDailyCount(s, '2026-09-15', 3));
-  ({ state: s } = setDailyCount(s, '2026-09-19', 4));
-  ({ state: s } = setDailyCount(s, '2026-09-13', 9)); // 지난주 일요일 — 안 셈
-  assert.deepEqual(weeklyRecordRate(s, '2026-09-19'), { from: '2026-09-14', to: '2026-09-20', recorded: 2, handsos: 7 });
-  assert.deepEqual(weeklyRecordRate(createState(), '2026-09-19').handsos, null, '적은 날이 없으면 null');
-});

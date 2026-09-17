@@ -288,8 +288,7 @@
         <div id="add-hits"></div>
       </div>
       <div class="msg" id="today-msg"></div>
-      ${items}
-      ${renderClosing()}`;
+      ${items}`;
   }
 
   // 이름을 칠 때마다 후보만 다시 그린다. 화면 전체를 다시 그리면 글자를 치던 자리가 날아간다.
@@ -488,27 +487,13 @@
   // 오늘 화면 맨 위 한 줄. 누르면 월별로 간다.
   function renderDashLine() {
     const m = Store.monthlyStats(state, today().slice(0, 7));
-    const w = Store.weeklyRecordRate(state, today());
-    const rate = w.handsos ? `${w.recorded}/${w.handsos}` : `${w.recorded}건`;
+    const over = Store.overdueCustomers(state, today(), state.settings.overdueFactor ?? 1.5).length;
     return `
       <div class="dash">
         <div class="tile" data-monthly="1"><b>이번 달 신규</b><span>${m.newCustomers}</span><small>명</small></div>
         <div class="tile" data-monthly="1"><b>이번 달 재방문</b><span>${m.returning}</span><small>명 · 방문 ${m.visits}건</small></div>
         <div class="tile" data-monthly="1"><b>가장 많이 한 시술</b><span style="font-size:17px">${esc(topKind(m.kinds))}</span></div>
-        <div class="tile" data-monthly="1"><b>이번 주 기록</b><span>${rate}</span><small>${w.handsos ? '카드/핸드SOS' : '핸드SOS 인원 미입력'}</small></div>
-      </div>`;
-  }
-
-  // 퇴근 때 적는 핸드SOS 오늘 시술 인원
-  function renderClosing() {
-    const n = Store.dailyCount(state, today());
-    return `
-      <div class="closing">
-        <b style="font-size:14px;color:var(--muted)">퇴근 때</b>
-        <span>핸드SOS 오늘 시술 인원</span>
-        <input type="number" id="handsos-count" min="0" value="${n ?? ''}" placeholder="명">
-        <button type="button" class="small secondary" data-action="save-count">저장</button>
-        <span class="msg" id="count-msg" style="margin:0">${n === null ? '' : `${n}명 적어 둠`}</span>
+        <div class="tile" data-monthly="1"><b>오래 안 온 고객</b><span>${over}</span><small>명 · 평소 주기 넘김</small></div>
       </div>`;
   }
 
@@ -605,15 +590,6 @@
     const mv = e.target.closest('button[data-month]');
     if (mv) { view = { kind: 'monthly', month: mv.dataset.month }; render(); return; }
     const btn = e.target.closest('button[data-action]');
-    if (btn && btn.dataset.action === 'save-count') {
-      try {
-        const v = $('#handsos-count').value;
-        if (v === '') { showMsg($('#count-msg'), '인원을 적으세요', 'error'); return; }
-        commit(Store.setDailyCount(state, today(), Number(v)).state);
-        render(); showMsg($('#count-msg'), `${v}명 적어 둠`, 'ok');
-      } catch (err) { showMsg($('#count-msg'), err.message, 'error'); }
-      return;
-    }
     if (!btn || view.kind !== 'card') return;
     const a = btn.dataset.action;
     try {
