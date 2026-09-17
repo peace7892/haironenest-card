@@ -1032,3 +1032,29 @@ test('주기 초과 고객: 평소 주기의 1.5배를 넘긴 고객만, 방문�
   assert.deepEqual(overdueCustomers(s, '2026-08-20', 1.5), [], '8/20엔 19일이라 아직');
 });
 
+
+// ---------------------------------------------------------------- 정액권 잔액 맞추기
+const { setPassBalance } = require('./store.js');
+
+test('잔액 맞추기: 카드 잔액과 다르면 그 차이만큼 충전 또는 사용 내역이 하나 생긴다', () => {
+  let { state: s, customer } = addCustomer(createState(), { name: '김OO', phone: '01011110001' });
+  let entry;
+  ({ state: s, entry } = setPassBalance(s, customer.id, '300,000원', '2026-09-18T10:00:00'));
+  assert.equal(passBalance(s, customer.id), 300000);
+  assert.equal(entry.kind, 'charge');
+  assert.match(entry.note, /잔액 맞춤/);
+  ({ state: s, entry } = setPassBalance(s, customer.id, 250000, '2026-09-18T11:00:00'));
+  assert.equal(passBalance(s, customer.id), 250000);
+  assert.equal(entry.kind, 'use');
+  assert.equal(entry.amount, 50000);
+});
+
+test('잔액 맞추기: 같은 금액이면 아무것도 안 생기고, 음수는 거부한다', () => {
+  let { state: s, customer } = addCustomer(createState(), { name: '김OO', phone: '01011110001' });
+  ({ state: s } = setPassBalance(s, customer.id, 100000, '2026-09-18T10:00:00'));
+  const before = s.passes.length;
+  const r = setPassBalance(s, customer.id, '100000', '2026-09-18T12:00:00');
+  assert.equal(r.entry, null);
+  assert.equal(r.state.passes.length, before);
+  assert.throws(() => setPassBalance(s, customer.id, -1, '2026-09-18T12:00:00'), /잔액/);
+});

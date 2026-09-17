@@ -130,7 +130,12 @@
       <details class="notice" ${noticeOpen ? 'open' : ''}>
         <summary>정액권 안내문 만들기 <small>잔액 ${Store.formatWon(bal)}</small></summary>
         <div class="notice-body">
-          <label style="margin-top:0">오늘 시술</label>
+          <label style="margin-top:0">지금 남은 잔액 (시술 전, 핸드SOS 기준)</label>
+          <div class="row">
+            <input type="text" id="notice-prev" class="won" inputmode="numeric" value="${bal > 0 ? Store.comma(bal) : ''}" placeholder="예: 300000 (카드 만들기 전에 끊은 정액권이면 여기 적으세요)" autocomplete="off">
+          </div>
+          <p class="hint">카드가 아는 잔액은 ${Store.formatWon(bal)}입니다. 다르게 적으면 [복사하고 정액권에 반영]할 때 카드 잔액을 이 금액에 맞춘 뒤 오늘 시술을 뺍니다.</p>
+          <label>오늘 시술</label>
           <div id="notice-items"></div>
           <button type="button" class="secondary small" data-action="notice-add">+ 시술 한 줄 더</button>
 
@@ -181,10 +186,12 @@
     const on = $('#notice-topup-on').checked;
     const tName = $('#notice-topup-name').value.trim();
     const tAmt = digitsOf($('#notice-topup-amt').value);
+    const prevRaw = $('#notice-prev') ? $('#notice-prev').value.trim() : '';
     return {
       head: $('#notice-head').value,
       tail: $('#notice-tail').value,
-      prev: Store.passBalance(state, view.id),
+      prev: prevRaw === '' ? Store.passBalance(state, view.id) : Number(digitsOf(prevRaw)) || 0,
+      prevTyped: prevRaw !== '',
       items,
       // 스위치를 켰어도 이름·금액이 둘 다 비면 빈 줄을 내보내지 않는다
       topup: on && (tName || tAmt)
@@ -632,6 +639,8 @@
         let next = state;
         try {
           if (a === 'notice-apply') {
+            // 원장이 적은 잔액이 카드 잔액과 다르면 먼저 그 금액으로 맞춘다 (차이만큼 내역 한 줄).
+            if (f.prevTyped) next = Store.setPassBalance(next, view.id, f.prev, now()).state;
             if (f.topup) {
               next = Store.chargePass(next, view.id, { amount: f.topup.amount, note: f.topup.name || '정액권 충전' }, now()).state;
               next = Store.rememberProduct(next, f.topup).state;

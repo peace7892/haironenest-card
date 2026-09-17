@@ -390,6 +390,20 @@ const Store = (() => {
     return { state: { ...state, settings: { ...state.settings, products } } };
   }
 
+  // 카드 잔액을 원장이 적은 금액(핸드SOS 기준)에 맞춘다. 차이만큼 충전(+) 또는 사용(-) 한 줄을 남긴다.
+  // 카드 만들기 전에 끊은 정액권처럼 카드가 모르는 잔액을 처음 맞출 때 쓴다.
+  function setPassBalance(state, customerId, target, now) {
+    requireCustomer(state, customerId);
+    const raw = String(target ?? '').trim().replace(/[\s,원]/g, '');
+    if (raw.startsWith('-')) throw new Error('잔액은 0원 이상이어야 합니다');
+    const want = raw === '0' ? 0 : cleanAmount(raw);
+    const have = passBalance(state, customerId);
+    if (want === have) return { state, entry: null };
+    const diff = want - have;
+    const entry = { id: state.nextId, customerId, kind: diff > 0 ? 'charge' : 'use', amount: Math.abs(diff), note: '잔액 맞춤 (핸드SOS 기준)', at: now, visitId: null };
+    return { state: { ...state, nextId: state.nextId + 1, passes: [...state.passes, entry] }, entry };
+  }
+
   const findProduct = (state, name) => state.settings.products.find(p => p.name === (name ?? '').trim()) ?? null;
 
   // ---- 오늘 명단 ----------------------------------------------------------
@@ -600,7 +614,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { KINDS, monthlyStats, retention, overdueCustomers, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { KINDS, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;
