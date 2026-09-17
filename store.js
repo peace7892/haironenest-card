@@ -3,9 +3,10 @@
 // 모든 함수는 기존 state를 바꾸지 않고 새 state를 돌려준다.
 const Store = (() => {
   const emptyProfile = () => ({ talk: '', hair: '' });
+  const KINDS = ['커트', '펌', '염색', '클리닉', '기타'];
 
   function createState() {
-    return { nextId: 1, customers: [], visits: [], passes: [], settings: defaultSettings(), today: { date: '', entries: [] } };
+    return { nextId: 1, customers: [], visits: [], passes: [], settings: defaultSettings(), today: { date: '', entries: [] }, dailyCounts: {} };
   }
 
   // ---- 고객 --------------------------------------------------------------
@@ -32,25 +33,25 @@ const Store = (() => {
     if (dup) throw new Error(`이미 같은 번호의 고객이 있습니다: ${dup.name}`);
   }
 
-  function addCustomer(state, { name, phone, referrer }) {
+  function addCustomer(state, { name, phone, referrer, isLegacy }) {
     const trimmed = (name ?? '').trim();
     if (!trimmed) throw new Error('이름을 입력하세요');
     const clean = cleanPhone(phone);
     assertPhoneFree(state, clean);
-    const customer = { id: state.nextId, name: trimmed, phone: clean, referrer: (referrer ?? '').trim(), profile: emptyProfile(), profileHistory: [], deletedAt: null };
+    const customer = { id: state.nextId, name: trimmed, phone: clean, referrer: (referrer ?? '').trim(), isLegacy: !!isLegacy, profile: emptyProfile(), profileHistory: [], deletedAt: null };
     return {
       state: { ...state, nextId: state.nextId + 1, customers: [...state.customers, customer] },
       customer,
     };
   }
 
-  function editCustomer(state, customerId, { name, phone, referrer }) {
+  function editCustomer(state, customerId, { name, phone, referrer, isLegacy }) {
     const c = requireCustomer(state, customerId);
     const trimmed = (name ?? '').trim();
     if (!trimmed) throw new Error('이름을 입력하세요');
     const clean = cleanPhone(phone);
     assertPhoneFree(state, clean, customerId);
-    const updated = { ...c, name: trimmed, phone: clean, referrer: (referrer ?? '').trim() };
+    const updated = { ...c, name: trimmed, phone: clean, referrer: (referrer ?? '').trim(), isLegacy: isLegacy === undefined ? !!c.isLegacy : !!isLegacy };
     return {
       state: { ...state, customers: state.customers.map(x => (x.id === customerId ? updated : x)) },
       customer: updated,
@@ -152,10 +153,13 @@ const Store = (() => {
 
   // ---- 방문 기록 (오늘 시술과 이유 / 다음 방향) -----------------------------
 
-  function visitFields({ done, next }) {
+  function visitFields({ done, next, kinds }) {
     const d = (done ?? '').trim();
     if (!d) throw new Error('오늘 시술 내용을 입력하세요');
-    return { done: d, next: (next ?? '').trim() };
+    const ks = Array.isArray(kinds) ? kinds : [];
+    const bad = ks.find(k => !KINDS.includes(k));
+    if (bad) throw new Error(`시술 종류는 ${KINDS.join('·')} 중에서 고르세요`);
+    return { done: d, next: (next ?? '').trim(), kinds: [...new Set(ks)] };
   }
 
   function addVisit(state, customerId, fields, now) {
@@ -471,6 +475,104 @@ const Store = (() => {
     });
   }
 
+  // ---- V2: 핸드SOS 인원, 월별 집계, 정착률, 주기 초과, 주간 기록률 ----------
+
+  function setDailyCount(state, date, count) {
+    const n = Number(count);
+    if (!Number.isInteger(n) || n < 0) throw new Error('인원은 0 이상의 숫자로 적으세요');
+    return { state: { ...state, dailyCounts: { ...(state.dailyCounts ?? {}), [date]: n } } };
+  }
+  function dailyCount(state, date) {
+    const v = (state.dailyCounts ?? {})[date];
+    return Number.isInteger(v) ? v : null;
+  }
+
+  const liveCustomers = (state) => state.customers.filter(c => !c.deletedAt);
+  const ascVisits = (state, customerId) => [...visitsOf(state, customerId)].reverse(); // 오래된 것부터
+  const iso = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+
+  // 한 달의 방문 건수·고객 수·신규·재방문·시술별·회차별
+  function monthlyStats(state, month) {
+    const kinds = Object.fromEntries(KINDS.map(k => [k, 0]));
+    kinds['미분류'] = 0;
+    let visits = 0, customers = 0, newCustomers = 0;
+    const rounds = { first: 0, two3: 0, fourPlus: 0, legacy: 0 };
+    for (const c of liveCustomers(state)) {
+      const all = ascVisits(state, c.id);
+      const inMonth = all.filter(v => v.createdAt.startsWith(month));
+      if (inMonth.length === 0) continue;
+      customers += 1;
+      visits += inMonth.length;
+      for (const v of inMonth) {
+        if (!v.kinds || v.kinds.length === 0) kinds['미분류'] += 1;
+        else for (const k of v.kinds) kinds[k] = (kinds[k] ?? 0) + 1;
+      }
+      if (!c.isLegacy && all[0].createdAt.startsWith(month)) newCustomers += 1;
+      if (c.isLegacy) rounds.legacy += 1;
+      else {
+        const round = all.indexOf(inMonth[inMonth.length - 1]) + 1; // 그 달 마지막 방문이 몇 번째인지
+        if (round === 1) rounds.first += 1; else if (round <= 3) rounds.two3 += 1; else rounds.fourPlus += 1;
+      }
+    }
+    const returning = customers - newCustomers;
+    return {
+      month, visits, customers, newCustomers, returning,
+      perCustomer: customers ? Math.round((visits / customers) * 100) / 100 : 0,
+      returningRatio: customers ? Math.round((returning / customers) * 100) / 100 : 0,
+      kinds, rounds,
+    };
+  }
+
+  // 처음 온 달별로, days 안에 두 번째 방문이 있었던 비율 (예전 고객 제외)
+  function retention(state, { days = 150, today }) {
+    const byMonth = {};
+    for (const c of liveCustomers(state)) {
+      if (c.isLegacy) continue;
+      const all = ascVisits(state, c.id);
+      if (all.length === 0) continue;
+      const first = all[0].createdAt.slice(0, 10);
+      const month = first.slice(0, 7);
+      const row = byMonth[month] ?? (byMonth[month] = { month, total: 0, returned: 0 });
+      row.total += 1;
+      if (all.length > 1 && daysBetween(first, all[1].createdAt.slice(0, 10)) <= days) row.returned += 1;
+    }
+    return Object.values(byMonth).sort((a, b) => (a.month < b.month ? -1 : 1)).map(r => {
+      const end = new Date(r.month + '-01T00:00:00');
+      end.setMonth(end.getMonth() + 1); end.setDate(0); // 그 달 말일
+      end.setDate(end.getDate() + days);
+      return { ...r, pending: today < iso(end), rate: r.total ? Math.round((r.returned / r.total) * 100) / 100 : 0 };
+    });
+  }
+
+  // 평소 주기의 factor배를 넘겼는데 안 온 고객. 방문이 한 번뿐이면 평소 주기가 없어 제외
+  function overdueCustomers(state, today, factor = 1.5) {
+    const out = [];
+    for (const c of liveCustomers(state)) {
+      const cyc = visitCycle(state, c.id, today);
+      if (cyc.average === null || cyc.sinceLast === null) continue;
+      if (cyc.sinceLast > cyc.average * factor) out.push({ customer: c, lastDate: cyc.lastDate, average: cyc.average, sinceLast: cyc.sinceLast });
+    }
+    return out.sort((a, b) => b.sinceLast - a.sinceLast);
+  }
+
+  // 이번 주(월~일) 카드 기록 건수와 핸드SOS 인원 합
+  function weeklyRecordRate(state, today) {
+    const d = new Date(today + 'T00:00:00');
+    const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    const from = iso(mon), to = iso(sun);
+    let recorded = 0;
+    for (const c of liveCustomers(state)) for (const v of visitsOf(state, c.id)) {
+      const day = v.createdAt.slice(0, 10);
+      if (day >= from && day <= to) recorded += 1;
+    }
+    let handsos = null;
+    for (const [day, n] of Object.entries(state.dailyCounts ?? {})) {
+      if (day >= from && day <= to && Number.isInteger(n)) handsos = (handsos ?? 0) + n;
+    }
+    return { from, to, recorded, handsos };
+  }
+
   // ---- 저장 ---------------------------------------------------------------
 
   function serialize(state) {
@@ -488,18 +590,19 @@ const Store = (() => {
   // 이전 버전(자유 메모 한 칸: memos[].text)을 방문 기록(visits[].done)으로 옮긴다.
   function migrate(p) {
     const customers = p.customers.map(({ last4, ...c }) => ({
-      ...c, phone: c.phone ?? last4 ?? '', referrer: c.referrer ?? '', profile: c.profile ?? emptyProfile(), profileHistory: c.profileHistory ?? [], deletedAt: c.deletedAt ?? null,
+      ...c, phone: c.phone ?? last4 ?? '', referrer: c.referrer ?? '', isLegacy: !!c.isLegacy, profile: c.profile ?? emptyProfile(), profileHistory: c.profileHistory ?? [], deletedAt: c.deletedAt ?? null,
     }));
     const fromMemos = (p.memos ?? []).map(m => ({
       id: m.id, customerId: m.customerId, done: m.text, next: '', createdAt: m.createdAt,
       history: (m.history ?? []).map(h => ({ done: h.text, next: '', replacedAt: h.replacedAt })),
     }));
-    const visits = [...(p.visits ?? []), ...fromMemos].map(v => ({ ...v, deletedAt: v.deletedAt ?? null }));
+    const visits = [...(p.visits ?? []), ...fromMemos].map(v => ({ ...v, deletedAt: v.deletedAt ?? null, kinds: Array.isArray(v.kinds) ? v.kinds.filter(k => KINDS.includes(k)) : [] }));
     const today = migrateToday(p.today);
     const settings = migrateSettings(p.settings);
     const passes = (p.passes ?? []).filter(x => x && typeof x.customerId === 'number' && (x.kind === 'charge' || x.kind === 'use'))
       .map(x => ({ id: x.id, customerId: x.customerId, kind: x.kind, amount: Number(x.amount) || 0, note: x.note ?? '', at: x.at ?? '', visitId: x.visitId ?? null }));
-    return { nextId: p.nextId ?? 1, customers, visits, passes, settings, today };
+    const dailyCounts = (p.dailyCounts && typeof p.dailyCounts === 'object' && !Array.isArray(p.dailyCounts)) ? p.dailyCounts : {};
+    return { nextId: p.nextId ?? 1, customers, visits, passes, settings, today, dailyCounts };
   }
 
   function migrateSettings(v) {
@@ -526,7 +629,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { KINDS, setDailyCount, dailyCount, monthlyStats, retention, overdueCustomers, weeklyRecordRate, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

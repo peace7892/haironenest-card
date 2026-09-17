@@ -946,3 +946,107 @@ test('설정이 없던 옛 백업도 기본 문구로 열린다', () => {
   const state = deserialize(old);
   assert.deepEqual(state.settings, { head: '정액권 안내드려요', tail: '입니다 : D', products: [] });
 });
+
+// ---------------------------------------------------------------- V2: 대시보드 재료
+const { KINDS, setDailyCount, dailyCount, monthlyStats, retention, overdueCustomers, weeklyRecordRate } = require('./store.js');
+
+function v2State() {
+  // 9월: 김OO(신규, 9/5·9/19 두 번), 이OO(예전 고객, 9/10), 박OO(신규 9/12), 최OO(8월 신규, 9/15 재방문), 정OO(8/1 이후 안 옴, 평소 30일)
+  let s = createState();
+  let kim, lee, park, choi, jung;
+  ({ state: s, customer: kim } = addCustomer(s, { name: '김OO', phone: '01011110001' }));
+  ({ state: s, customer: lee } = addCustomer(s, { name: '이OO', phone: '01011110002', isLegacy: true }));
+  ({ state: s, customer: park } = addCustomer(s, { name: '박OO', phone: '01011110003' }));
+  ({ state: s, customer: choi } = addCustomer(s, { name: '최OO', phone: '01011110004' }));
+  ({ state: s, customer: jung } = addCustomer(s, { name: '정OO', phone: '01011110005' }));
+  ({ state: s } = addVisit(s, kim.id, { done: '커트', kinds: ['커트'] }, '2026-09-05T11:00:00'));
+  ({ state: s } = addVisit(s, kim.id, { done: '뿌리 염색', kinds: ['염색'] }, '2026-09-19T11:00:00'));
+  ({ state: s } = addVisit(s, lee.id, { done: '커트+펌', kinds: ['커트', '펌'] }, '2026-09-10T11:00:00'));
+  ({ state: s } = addVisit(s, park.id, { done: '커트' }, '2026-09-12T11:00:00'));
+  ({ state: s } = addVisit(s, choi.id, { done: '커트', kinds: ['커트'] }, '2026-08-20T11:00:00'));
+  ({ state: s } = addVisit(s, choi.id, { done: '커트', kinds: ['커트'] }, '2026-09-15T11:00:00'));
+  ({ state: s } = addVisit(s, jung.id, { done: '커트', kinds: ['커트'] }, '2026-06-02T11:00:00'));
+  ({ state: s } = addVisit(s, jung.id, { done: '커트', kinds: ['커트'] }, '2026-07-02T11:00:00'));
+  ({ state: s } = addVisit(s, jung.id, { done: '커트', kinds: ['커트'] }, '2026-08-01T11:00:00'));
+  return { s, kim, lee, park, choi, jung };
+}
+
+test('시술 종류 칩은 정해진 것만 받고, 없으면 빈 목록', () => {
+  const { state, customer } = addCustomer(createState(), { name: '김OO', phone: '01011110001' });
+  const { visit } = addVisit(state, customer.id, { done: '커트', kinds: ['커트', '펌'] }, '2026-09-05T11:00:00');
+  assert.deepEqual(visit.kinds, ['커트', '펌']);
+  assert.deepEqual(addVisit(state, customer.id, { done: '커트' }, '2026-09-05T11:00:00').visit.kinds, []);
+  assert.throws(() => addVisit(state, customer.id, { done: '커트', kinds: ['마사지'] }, '2026-09-05T11:00:00'), /시술 종류/);
+  assert.ok(KINDS.includes('커트') && KINDS.includes('기타'));
+});
+
+test('예전부터 오던 고객 체크는 만들 때와 고칠 때 둘 다 되고, 옛 데이터는 false', () => {
+  let { state, customer } = addCustomer(createState(), { name: '이OO', phone: '01011110002', isLegacy: true });
+  assert.equal(customer.isLegacy, true);
+  ({ state } = editCustomer(state, customer.id, { name: '이OO', phone: '01011110002', referrer: '', isLegacy: false }));
+  assert.equal(state.customers[0].isLegacy, false);
+  const old = deserialize(JSON.stringify({ nextId: 2, customers: [{ id: 1, name: '김OO', phone: '01012345678' }], visits: [] }));
+  assert.equal(old.customers[0].isLegacy, false);
+});
+
+test('핸드SOS 오늘 시술 인원을 날짜별로 적고 다시 읽는다', () => {
+  let s = createState();
+  ({ state: s } = setDailyCount(s, '2026-09-19', 8));
+  ({ state: s } = setDailyCount(s, '2026-09-19', 9));
+  assert.equal(dailyCount(s, '2026-09-19'), 9);
+  assert.equal(dailyCount(s, '2026-09-20'), null);
+  assert.throws(() => setDailyCount(s, '2026-09-19', -1), /인원/);
+  assert.deepEqual(deserialize(serialize(s)).dailyCounts, s.dailyCounts);
+});
+
+test('월별 집계: 방문 건수와 방문 고객 수를 따로, 신규+재방문=고객 수, 시술별·회차별', () => {
+  const { s } = v2State();
+  const m = monthlyStats(s, '2026-09');
+  assert.equal(m.visits, 5, '김 2 + 이 1 + 박 1 + 최 1');
+  assert.equal(m.customers, 4);
+  assert.equal(m.newCustomers, 2, '김·박. 이OO은 예전 고객이라 신규 아님');
+  assert.equal(m.returning, 2, '이·최');
+  assert.equal(m.perCustomer, 1.25);
+  assert.deepEqual(m.kinds, { '커트': 3, '펌': 1, '염색': 1, '클리닉': 0, '기타': 0, '미분류': 1 });
+  assert.deepEqual(m.rounds, { first: 1, two3: 2, fourPlus: 0, legacy: 1 });
+  assert.equal(monthlyStats(s, '2026-05').visits, 0);
+});
+
+test('월별 집계는 지운 방문 기록과 지운 고객을 빼고 센다', () => {
+  let { s, park } = v2State();
+  const parkVisit = visitsOf(s, park.id)[0];
+  ({ state: s } = deleteVisit(s, parkVisit.id, '2026-09-20T09:00:00'));
+  assert.equal(monthlyStats(s, '2026-09').visits, 4);
+  assert.equal(monthlyStats(s, '2026-09').customers, 3);
+});
+
+test('신규 정착률: 처음 온 달별로 150일 안에 두 번째 방문한 비율, 아직 기간이 안 지났으면 집계 중', () => {
+  const { s } = v2State();
+  const now = retention(s, { days: 150, today: '2026-09-20' });
+  const sep = now.find(r => r.month === '2026-09');
+  assert.deepEqual({ total: sep.total, returned: sep.returned, pending: sep.pending }, { total: 2, returned: 1, pending: true }, '김 돌아옴, 박 아직');
+  assert.equal(now.find(r => r.month === '2026-08').returned, 1, '최 8/20 → 9/15');
+  assert.ok(!now.some(r => r.month === '2026-07' && r.total > 0), '예전 고객 이OO은 어느 달에도 신규가 아니다');
+  const later = retention(s, { days: 150, today: '2027-03-01' });
+  assert.equal(later.find(r => r.month === '2026-06').pending, false);
+  assert.equal(later.find(r => r.month === '2026-09').returned, 1);
+});
+
+test('주기 초과 고객: 평소 주기의 1.5배를 넘긴 고객만, 방문이 한 번뿐이면 제외', () => {
+  const { s, jung } = v2State();
+  const list = overdueCustomers(s, '2026-09-20', 1.5);
+  assert.deepEqual(list.map(o => o.customer.id), [jung.id]);
+  assert.equal(list[0].average, 30);
+  assert.equal(list[0].sinceLast, 50);
+  assert.equal(list[0].lastDate, '2026-08-01');
+  assert.deepEqual(overdueCustomers(s, '2026-08-20', 1.5), [], '8/20엔 19일이라 아직');
+});
+
+test('주간 기록률: 이번 주(월~일) 카드 기록 건수와 핸드SOS 인원 합', () => {
+  let { s } = v2State();
+  ({ state: s } = setDailyCount(s, '2026-09-15', 3));
+  ({ state: s } = setDailyCount(s, '2026-09-19', 4));
+  ({ state: s } = setDailyCount(s, '2026-09-13', 9)); // 지난주 일요일 — 안 셈
+  assert.deepEqual(weeklyRecordRate(s, '2026-09-19'), { from: '2026-09-14', to: '2026-09-20', recorded: 2, handsos: 7 });
+  assert.deepEqual(weeklyRecordRate(createState(), '2026-09-19').handsos, null, '적은 날이 없으면 null');
+});
