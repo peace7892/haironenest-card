@@ -49,12 +49,14 @@
   // ---- 왼쪽: 고객 목록 ----------------------------------------------------
   function renderCustomers() {
     const list = $('#customer-list');
-    const found = Store.findCustomers(state, $('#search').value);
+    const q = $('#search').value.trim();
     const activeId = view.kind === 'card' ? view.id : null;
-    if (found.length === 0) {
-      list.innerHTML = `<li class="empty">${state.customers.length === 0 ? '아직 고객이 없습니다.' : '찾는 고객이 없습니다.'}</li>`;
+    if (!q) {
+      list.innerHTML = `<li class="empty">이름이나 전화번호를 치면 여기에 뜹니다.<br><small>고객 ${state.customers.filter((c) => !c.deletedAt).length}명</small></li>`;
       return;
     }
+    const found = Store.findCustomers(state, q);
+    if (found.length === 0) { list.innerHTML = '<li class="empty">찾는 고객이 없습니다.</li>'; return; }
     const todayIds = state.today.date === today() ? state.today.entries.map((e) => e.customerId) : [];
     list.innerHTML = found.map((c) => `
       <li data-id="${c.id}" class="${c.id === activeId ? 'active' : ''}">
@@ -63,7 +65,6 @@
       </li>`).join('');
   }
 
-  // 예약 시간 고르는 칸. 영업시간 밖 시간이 이미 적혀 있으면(옛 기록) 그 시간도 후보에 끼워 준다.
   function timeOptions(selected) {
     const slots = Store.timeSlots();
     const all = slots.includes(selected) || !selected ? slots : [...slots, selected].sort();
@@ -344,24 +345,29 @@
         ${lastNext ? `<p class="next">다음 방향: ${esc(lastNext)}</p>` : ''}
       </div>`;
     return `
-      ${renderIdentity(c, visits.length)}
-      ${lastBlock}
-      <form id="visit-form">
-        <label style="margin-top:4px">오늘 시술 내용과 그 이유 (필수)</label>
-        <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
-        <label>시술 종류 (여러 개 가능, 안 골라도 됨)</label>
-        ${renderChips('visit-kind', [])}
-        <label>다음에 하기로 한 방향 (비워도 됨)</label>
-        <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담"></textarea>
-          <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
-      </form>
-      <div class="cycle big">${cycleText(Store.visitCycle(state, c.id, today()))}</div>
-      ${renderProfile(c)}
-      ${renderPass(c)}
-      ${renderNotice(c)}
-      <h3>지난 방문</h3>
-      ${visits.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : visits.map(renderVisit).join('')}
-      ${renderDeletedVisits(c)}`;
+      <div class="card-split">
+        <div class="col-left">
+          ${renderIdentity(c, visits.length)}
+          ${lastBlock}
+          <form id="visit-form">
+            <label style="margin-top:4px">오늘 시술 내용과 그 이유 (필수)</label>
+            <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
+            <label>시술 종류 (여러 개 가능, 안 골라도 됨)</label>
+            ${renderChips('visit-kind', [])}
+            <label>다음에 하기로 한 방향 (비워도 됨)</label>
+            <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담"></textarea>
+              <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
+          </form>
+          ${renderProfile(c)}
+          ${renderPass(c)}
+          ${renderNotice(c)}
+        </div>
+        <div class="col-right">
+          <h3 style="margin-top:0">지난 방문 <small style="font-weight:normal;color:var(--muted)">${visits.length}건 · ${cycleText(Store.visitCycle(state, c.id, today()))}</small></h3>
+          ${visits.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : visits.map(renderVisit).join('')}
+          ${renderDeletedVisits(c)}
+        </div>
+      </div>`;
   }
 
   // 실수로 두 번 적은 기록을 치우는 자리. 지운 게 없으면 아예 안 보인다.
