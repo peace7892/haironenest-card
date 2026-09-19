@@ -11,6 +11,7 @@
   let passForm = null;   // null | 'charge' | 'use'
   let passOpen = false;
   let noticeOpen = false;
+  let cardTab = 'today';   // 'today' | 'history'
 
   const $ = (sel) => document.querySelector(sel);
   const pad = (n) => String(n).padStart(2, '0');
@@ -25,7 +26,7 @@
     localStorage.setItem(KEY, Store.serialize(state));
   }
   function showMsg(el, text, kind) { if (el) { el.textContent = text; el.className = `msg ${kind}`; } }
-  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; passForm = null; passOpen = false; noticeOpen = false; commit(Store.markToday(state, id, today()).state); render(); }
+  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; passForm = null; passOpen = false; noticeOpen = false; cardTab = 'today'; commit(Store.markToday(state, id, today()).state); render(); }
 
   // ---- 왼쪽: 고객 목록 ----------------------------------------------------
   function renderCustomers() {
@@ -236,39 +237,43 @@
       </details>`;
   }
 
-  // ---- 오른쪽: 오늘 명단 ---------------------------------------------------
-  function renderToday() {
+  // ---- 오른쪽: 오늘 명단 (항상 보인다) -----------------------------------
+  // 카드를 열어도 명단은 그대로 옆에 있어서, 다음 손님을 바로 누를 수 있다.
+  function renderTodayPanel() {
     const list = Store.todayList(state, today());
     const done = list.filter((t) => t.recorded).length;
+    const activeId = view.kind === 'card' ? view.id : null;
     const items = list.length === 0
       ? '<div class="empty">위 칸에 예약 시간과 이름을 넣어 오늘 올 고객을 쭉 올려두세요.<br>손님이 다녀가면 그 줄을 눌러 기록을 남깁니다.</div>'
       : list.map((t) => `
-        <div class="today-item" data-open="${t.customer.id}">
+        <div class="today-item ${t.customer.id === activeId ? 'active' : ''}" data-open="${t.customer.id}">
           <div class="no">${t.order}</div>
           <div class="when"><select class="at" data-at="${t.customer.id}" title="예약 시간">${timeOptions(t.at)}</select></div>
           <div class="who">
-            <div class="name">${esc(t.customer.name)} <small style="color:var(--muted);font-weight:normal">${esc(Store.maskPhone(t.customer.phone))}</small></div>
-            <div class="cycle">${cycleText(t)}</div>
-            <div class="sub">${esc([t.customer.profile.hair, t.customer.profile.talk].filter(Boolean).join(' · ')) || '<i>고정 정보 없음</i>'}</div>
-            ${t.lastNext ? `<div class="sub">지난번 다음 방향: ${esc(t.lastNext)}</div>` : ''}
+            <div class="name">${esc(t.customer.name)}</div>
+            <div class="cycle">${cycleText(t)}${t.balance > 0 ? ` · <span class="status pass">정액권 ${Store.formatWon(t.balance)}</span>` : ''}</div>
           </div>
           <div class="right">
             <span class="status ${t.recorded ? 'done' : 'todo'}">${t.recorded ? '기록 남김' : '아직 안 적음'}</span>
-            ${t.balance > 0 ? `<span class="status pass">정액권 ${Store.formatWon(t.balance)}</span>` : ''}
-            <button type="button" class="link small" data-drop="${t.customer.id}">명단에서 빼기</button>
+            <button type="button" class="link small" data-drop="${t.customer.id}" title="명단에서 빼기">빼기</button>
           </div>
         </div>`).join('');
-    return `
+    $('#today').innerHTML = `
       <h2 class="card-title">오늘 <small>${today().replace(/-/g, '.')} · ${list.length}명 중 ${done}명 기록 남김</small></h2>
       <div class="add-today">
         <div class="row">
           <select class="at" id="add-at" title="예약 시간 (안 골라도 됩니다)">${timeOptions('')}</select>
-          <input type="text" id="add-name" placeholder="이름이나 전화번호를 치면 아래에 뜹니다" autocomplete="off">
+          <input type="text" id="add-name" placeholder="이름이나 번호" autocomplete="off">
         </div>
         <div id="add-hits"></div>
       </div>
       <div class="msg" id="today-msg"></div>
       ${items}`;
+  }
+
+  // 가운데에 아무 카드도 안 열렸을 때
+  function renderCenterEmpty() {
+    return '<div class="card-empty">오른쪽 오늘 명단에서 고객을 누르면 여기에 카드가 열립니다.<br>명단에 없는 고객은 왼쪽에서 이름으로 찾으세요.</div>';
   }
 
   // 이름을 칠 때마다 후보만 다시 그린다. 화면 전체를 다시 그리면 글자를 치던 자리가 날아간다.
@@ -304,27 +309,64 @@
     } catch (err) { showMsg($('#today-msg'), err.message, 'error'); }
   }
 
-  // ---- 오른쪽: 고객 카드 ---------------------------------------------------
+  // ---- 가운데: 고객 카드 ---------------------------------------------------
+  // 위에서 아래로: [오늘] [지난 방문] 탭 → 누구인지 한 줄 → 기억할 것 한 줄 → 오늘 적기.
+  // 지난 방문은 탭 뒤에 두어 카드가 길어지지 않게 한다.
   function renderCard(c) {
     const visits = Store.visitsWithGaps(state, c.id);
-    const latestNext = visits.find((v) => v.next)?.next;
     return `
-      ${renderIdentity(c, visits.length)}
-      <div class="cycle big">${cycleText(Store.visitCycle(state, c.id, today()))}</div>
-      ${renderPass(c)}
-      ${renderProfile(c)}
-      ${latestNext ? `<div class="next-big"><b>지난번에 다음에 하기로 한 것</b><p>${esc(latestNext)}</p></div>` : ''}
+      <div class="tabs">
+        <button type="button" data-tab="today" class="${cardTab === 'today' ? 'on' : ''}">오늘</button>
+        <button type="button" data-tab="history" class="${cardTab === 'history' ? 'on' : ''}">지난 방문 ${visits.length}건</button>
+      </div>
+      ${renderIdentity(c, Store.visitCycle(state, c.id, today()))}
+      ${cardTab === 'history' ? renderHistoryTab(c, visits) : renderTodayTab(c, visits)}`;
+  }
+
+  function renderTodayTab(c, visits) {
+    // '지난번'은 오늘 것을 뺀 직전 방문. 오늘 기록을 남겨도 이 줄은 흔들리지 않는다.
+    const prev = visits.find((v) => !v.createdAt.startsWith(today()));
+    return `
+      ${renderMemo(c, prev)}
       <form id="visit-form">
-        <label>오늘 시술 내용과 그 이유 (필수)</label>
+        <label style="margin-top:0">오늘 시술 내용과 그 이유 (필수)</label>
         <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
         <label>다음에 하기로 한 방향 (비워도 됨)</label>
         <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담"></textarea>
-          <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
+        <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
       </form>
-      ${renderNotice(c)}
-      <h3>지난 방문</h3>
+      ${renderPass(c)}
+      ${renderNotice(c)}`;
+  }
+
+  function renderHistoryTab(c, visits) {
+    return `
       ${visits.length === 0 ? '<div class="empty">아직 기록이 없습니다.</div>' : visits.map(renderVisit).join('')}
       ${renderDeletedVisits(c)}`;
+  }
+
+  const fmtDay = (iso) => iso.slice(0, 10).replace(/-/g, '.');
+  const shorten = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
+
+  // 기억할 것 한 줄(고정 정보) + 지난번 시술 한 줄. 고칠 때만 두 칸으로 펼쳐진다.
+  function renderMemo(c, prev) {
+    if (editingProfile) return renderProfile(c);
+    const p = c.profile;
+    const memo = [p.hair, p.talk].filter(Boolean).join(' · ');
+    const last = prev
+      ? `${fmtDay(prev.createdAt)} · ${esc(shorten(prev.done, 90))}${prev.next ? ` → 다음: ${esc(shorten(prev.next, 60))}` : ''}`
+      : '<i>첫 방문</i>';
+    const history = c.profileHistory.length === 0 ? '' : `
+      <details><summary>고치기 전 메모 ${c.profileHistory.length}건</summary>
+        <div class="history">${[...c.profileHistory].reverse().map((h) => `<p><small>${fmt(h.replacedAt)}까지</small><br>${esc([h.hair, h.talk].filter(Boolean).join(' · ')) || '—'}</p>`).join('')}</div>
+      </details>`;
+    return `
+      <div class="memo">
+        <div class="line"><span class="k">메모</span><span class="v">${esc(memo) || '<i>아직 없음</i>'}</span>
+          <button type="button" class="link" data-action="edit-profile">${memo ? '고치기' : '적기'}</button></div>
+        <div class="line"><span class="k">지난번</span><span class="v">${last}</span></div>
+        ${history}
+      </div>`;
   }
 
   // 실수로 두 번 적은 기록을 치우는 자리. 지운 게 없으면 아예 안 보인다.
@@ -350,7 +392,7 @@
 
   const fmtPhone = (p) => (p.length === 11 ? `${p.slice(0, 3)}-${p.slice(3, 7)}-${p.slice(7)}` : p.length === 10 ? `${p.slice(0, 3)}-${p.slice(3, 6)}-${p.slice(6)}` : p);
 
-  function renderIdentity(c, visitCount) {
+  function renderIdentity(c, cycle) {
     if (editingIdentity) {
       return `
         <div class="identity">
@@ -367,9 +409,13 @@
     }
     const phoneText = !c.phone ? '번호 없음' : c.phone.length <= 4 ? `뒤 4자리만 있음 ${esc(c.phone)}` : esc(fmtPhone(c.phone));
     return `
-      <h2 class="card-title">${esc(c.name)} <small>${phoneText} · 지난 방문 ${visitCount}건</small>
-        <button type="button" class="link" data-action="edit-identity">이름·번호·소개 고치기</button></h2>
-      <div class="referrer">${c.referrer ? '소개: ' + esc(c.referrer) : '<i>소개해 준 분 없음</i>'}</div>`;
+      <div class="head-line">
+        <span class="name">${esc(c.name)}</span>
+        <span class="phone">${phoneText}</span>
+        <span class="ref">${c.referrer ? '소개: ' + esc(c.referrer) : '소개 없음'}</span>
+        <span class="cycle">${cycleText(cycle)}</span>
+        <button type="button" class="link" data-action="edit-identity">고치기</button>
+      </div>`;
   }
 
   function renderProfile(c) {
@@ -386,19 +432,7 @@
             <button type="button" data-action="save-profile">고정 정보 저장</button></div>
         </div>`;
     }
-    const history = c.profileHistory.length === 0 ? '' : `
-      <details><summary>고치기 전 고정 정보 ${c.profileHistory.length}건</summary>
-        <div class="history">${[...c.profileHistory].reverse().map((h) => `<p><small>${fmt(h.replacedAt)}까지</small><br>${esc(h.talk) || '—'}<br>${esc(h.hair) || '—'}</p>`).join('')}</div>
-      </details>`;
-    return `
-      <div class="profile">
-        <div class="grid">
-          <div class="item"><b>고객이 한 말 · 생활 습관 · 직업이나 상황</b><p>${esc(p.talk) || '<i style="color:var(--muted)">아직 없음</i>'}</p></div>
-          <div class="item"><b>얼굴형 · 모질 · 두상</b><p>${esc(p.hair) || '<i style="color:var(--muted)">아직 없음</i>'}</p></div>
-        </div>
-        <div class="row" style="margin-top:10px"><span></span><button type="button" class="link" data-action="edit-profile">고정 정보 ${p.talk || p.hair ? '고치기' : '적기'}</button></div>
-        ${history}
-      </div>`;
+    return '';
   }
 
   function renderVisit(v) {
@@ -439,11 +473,14 @@
   }
 
   function render() {
+    if (view.kind === 'card' && !customerOf(view.id)) view = { kind: 'today' };
     renderCustomers();
     renderTrash();
+    renderTodayPanel();
+    renderAddHits();
     const card = $('#card');
-    if (view.kind === 'card' && customerOf(view.id)) { card.innerHTML = renderCard(customerOf(view.id)); setupNotice(); }
-    else { view = { kind: 'today' }; card.innerHTML = renderToday(); renderAddHits(); }
+    if (view.kind === 'card') { card.innerHTML = renderCard(customerOf(view.id)); setupNotice(); }
+    else card.innerHTML = renderCenterEmpty();
   }
 
   // ---- 이벤트 --------------------------------------------------------------
@@ -469,21 +506,50 @@
     } catch (err) { showMsg($('#new-msg'), err.message, 'error'); }
   });
 
-  $('#card').addEventListener('click', (e) => {
+  // 오른쪽 오늘 명단
+  $('#today').addEventListener('click', (e) => {
     // 시간 칸을 누른 것뿐인데 카드가 열려버리면 안 된다
-    if (e.target.closest('input, textarea, select')) return;
-
+    if (e.target.closest('input, select')) return;
     const drop = e.target.closest('button[data-drop]');
     if (drop) { commit(Store.unmarkToday(state, Number(drop.dataset.drop), today()).state); render(); return; }
     const add = e.target.closest('button[data-add]');
     if (add) { addToToday(Number(add.dataset.add)); return; }
     const addNew = e.target.closest('button[data-add-new]');
     if (addNew) { addToToday(null, $('#add-name').value.trim()); return; }
-
     const open = e.target.closest('[data-open]');
-    if (open) { openCard(Number(open.dataset.open)); return; }
+    if (open) openCard(Number(open.dataset.open));
+  });
+  $('#today').addEventListener('input', (e) => { if (e.target.id === 'add-name') renderAddHits(); });
+  // 시간 → Tab → 이름 → Enter 로 한 명씩 빠르게 올린다
+  $('#today').addEventListener('keydown', (e) => {
+    if (e.target.id !== 'add-name' || e.key !== 'Enter') return;
+    e.preventDefault();
+    const first = $('#add-hits button[data-add]') || $('#add-hits button[data-add-new]');
+    if (first) first.click();
+  });
+  // 명단에 올린 뒤 시간을 고치면 줄 순서도 따라 바뀐다
+  $('#today').addEventListener('change', (e) => {
+    const at = e.target.closest('[data-at]');
+    if (!at) return;
+    const id = Number(at.dataset.at);
+    try {
+      commit(Store.setTodayTime(state, id, today(), at.value).state);
+      render();
+    } catch (err) {
+      const kept = Store.todayList(state, today()).find((t) => t.customer.id === id);
+      at.value = kept ? kept.at : '';
+      showMsg($('#today-msg'), err.message, 'error');
+    }
+  });
+
+  // 가운데 카드
+  $('#card').addEventListener('click', (e) => {
+    if (e.target.closest('input, textarea, select')) return;
+    if (view.kind !== 'card') return;
+    const tab = e.target.closest('button[data-tab]');
+    if (tab) { cardTab = tab.dataset.tab; render(); return; }
     const btn = e.target.closest('button[data-action]');
-    if (!btn || view.kind !== 'card') return;
+    if (!btn) return;
     const a = btn.dataset.action;
     try {
       if (a === 'edit-identity') { editingIdentity = true; render(); $('#id-name').focus(); }
@@ -634,16 +700,7 @@
   });
 
   $('#card').addEventListener('input', (e) => {
-    if (e.target.id === 'add-name') { renderAddHits(); return; }
     if (e.target.closest('.notice')) refreshNotice();
-  });
-
-  // 시간 → Tab → 이름 → Enter 로 한 명씩 빠르게 올린다
-  $('#card').addEventListener('keydown', (e) => {
-    if (e.target.id !== 'add-name' || e.key !== 'Enter') return;
-    e.preventDefault();
-    const first = $('#add-hits button[data-add]') || $('#add-hits button[data-add-new]');
-    if (first) first.click();
   });
 
   $('#card').addEventListener('change', (e) => {
@@ -670,21 +727,6 @@
       e.target.value = n ? Store.comma(n) : '';
       refreshNotice();
       return;
-    }
-  });
-
-  // 명단에 올린 뒤 시간을 고치면 줄 순서도 따라 바뀐다
-  $('#card').addEventListener('change', (e) => {
-    const at = e.target.closest('[data-at]');
-    if (!at) return;
-    const id = Number(at.dataset.at);
-    try {
-      commit(Store.setTodayTime(state, id, today(), at.value).state);
-      render();
-    } catch (err) {
-      const kept = Store.todayList(state, today()).find((t) => t.customer.id === id);
-      at.value = kept ? kept.at : '';
-      showMsg($('#today-msg'), err.message, 'error');
     }
   });
 
