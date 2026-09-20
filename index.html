@@ -11,9 +11,32 @@
   header { padding: 12px 20px; background: #fff; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
   header h1 { margin: 0; font-size: 18px; cursor: pointer; }
   header small { color: var(--muted); flex: 1; }
-  main { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 53px); }
-  aside { background: #fff; border-right: 1px solid var(--line); padding: 16px; }
-  section { padding: 20px 28px; max-width: 1400px; }
+  /* 세 칸: 왼쪽 고객 찾기 · 가운데 카드 · 오른쪽 오늘 명단(카드를 열어도 그대로 있다) */
+  main { display: grid; grid-template-columns: 250px minmax(0, 1fr) 400px; min-height: calc(100vh - 53px); }
+  aside { background: #fff; border-right: 1px solid var(--line); padding: 16px; min-width: 0; }
+  aside.today-panel { border-right: 0; border-left: 1px solid var(--line); }
+  section { padding: 18px 28px; min-width: 0; }
+  .card-empty { color: var(--muted); padding: 30px 12px; line-height: 1.7; }
+  /* 카드 맨 위: [오늘] [지난 방문 N건] 탭 */
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 12px; }
+  .tabs button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); padding: 8px 12px; font-size: 14px; font-weight: 600; margin-bottom: -1px; }
+  .tabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
+  /* 첫 줄: 이름 · 전화번호 · 소개인 · 주기 · [고치기] */
+  .head-line { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 0 0 10px; }
+  .head-line .name { font-size: 24px; font-weight: 700; }
+  .head-line .phone { font-size: 15px; }
+  .head-line .ref { font-size: 14px; color: var(--muted); }
+  .head-line .cycle { margin-left: auto; font-size: 14px; white-space: nowrap; }
+  /* 그 밑: 기억할 것 한 줄(remember)과 지난번 시술 한 줄 — .memo는 정액권 내역 줄이 쓴다 */
+  .remember { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin: 0 0 14px; }
+  .remember .line { display: flex; gap: 12px; align-items: baseline; padding: 6px 0; }
+  .remember .line + .line { border-top: 1px dotted var(--line); }
+  .remember .k { flex: 0 0 48px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .remember .v { flex: 1; font-size: 15px; line-height: 1.5; white-space: pre-wrap; min-width: 0; }
+  .remember .v i { color: var(--muted); }
+  .remember .v .kinds-inline { margin: 0 6px 0 0; vertical-align: middle; }
+  .remember .line > button { flex: 0 0 auto; }
+  .remember details summary { font-size: 13px; margin: 4px 0 2px; }
   input, textarea, button { font: inherit; }
   input[type=text], textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
   input:focus, textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
@@ -64,14 +87,22 @@
   details summary { cursor: pointer; color: var(--muted); margin: 10px 0 6px; }
   .newform { display: grid; gap: 8px; }
   h3 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 24px 0 10px; }
-  .today-item { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; cursor: pointer; display: grid; grid-template-columns: 30px 118px 1fr auto; gap: 12px; align-items: center; }
+  /* 오른쪽 명단 한 줄: 순번 · 시간 · 이름/주기 · 상태 (좁은 칸에 맞춰 짧게) */
+  .today-item { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; margin-bottom: 8px; cursor: pointer; display: grid; grid-template-columns: 22px 84px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
   .today-item:hover { background: var(--accent-bg); }
-  .today-item .no { text-align: center; font-size: 19px; font-weight: 700; color: var(--muted); }
-  .today-item .who { display: grid; gap: 3px; min-width: 0; }
-  .today-item .name { font-weight: 600; font-size: 17px; }
-  .today-item .sub { color: var(--muted); font-size: 14px; white-space: pre-wrap; }
-  .today-item .right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-  .today-item .status { font-size: 13px; padding: 3px 8px; border-radius: 999px; }
+  .today-item.active { background: var(--accent-bg); border-color: var(--accent); }
+  .today-item .no { text-align: center; font-size: 15px; font-weight: 700; color: var(--muted); }
+  .today-item .who { display: grid; gap: 2px; min-width: 0; }
+  .today-item .name { font-weight: 600; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .today-item .cycle { font-size: 12px; line-height: 1.4; }
+  .today-item .right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .today-item .status { font-size: 12px; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+  .today-item .when .at { padding: 6px 2px; font-size: 14px; width: 100%; }
+  .today-panel .card-title { font-size: 18px; margin-bottom: 10px; }
+  .today-panel .add-today { padding: 10px 12px; margin-bottom: 12px; }
+  .today-panel .add-today .row { flex-wrap: wrap; }
+  .today-panel .add-today .row > .at { flex: 0 0 100px; }
+  .today-panel .add-today .row > input { flex: 1 1 160px; }
   .cycle { font-size: 14px; color: var(--accent); }
   .cycle b { font-weight: 700; }
   .cycle.big { background: var(--accent-bg); border-radius: 8px; padding: 8px 12px; margin: 8px 0 0; font-size: 15px; }
@@ -162,6 +193,10 @@
     header small { flex-basis: 100%; order: 3; }
     main { grid-template-columns: 1fr; }
     aside { border-right: 0; border-bottom: 1px solid var(--line); padding: 12px; }
+    aside.today-panel { order: 1; border-left: 0; }
+    section { order: 2; }
+    aside:not(.today-panel) { order: 3; border-bottom: 0; border-top: 1px solid var(--line); }
+    .head-line .cycle { margin-left: 0; flex-basis: 100%; }
     section { padding: 14px; }
     .dash { grid-template-columns: 1fr 1fr; }
     .card-title { font-size: 19px; flex-wrap: wrap; }
@@ -186,7 +221,7 @@
 </header>
 <main>
   <aside>
-    <input type="text" id="search" placeholder="고객 이름 또는 뒤 4자리로 찾기" autocomplete="off">
+    <input type="text" id="search" placeholder="이름이나 뒤 4자리로 찾기" autocomplete="off">
     <ul class="list" id="customer-list"></ul>
     <details id="new-customer">
       <summary>+ 새 고객 만들기</summary>
@@ -202,6 +237,7 @@
     <div id="trash"></div>
   </aside>
   <section id="card"></section>
+  <aside id="today" class="today-panel"></aside>
 </main>
 <datalist id="service-list">
   <option value="여성컷"></option><option value="남성컷"></option><option value="남성다운컷"></option>
