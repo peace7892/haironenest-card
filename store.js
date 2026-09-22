@@ -162,9 +162,24 @@ const Store = (() => {
     return { done: d, next: (next ?? '').trim(), kinds: [...new Set(ks)] };
   }
 
+  // 방문 날짜. 못 적고 지나간 날 것을 나중에 적을 때 그 날짜로 둔다.
+  // 시각은 건드리지 않는다: 새로 적으면 지금 시각, 고치면 원래 시각을 그대로 쓴다.
+  // 비우면 null(그대로 둔다). 오늘보다 뒤는 안 된다.
+  function visitDate(date, now) {
+    const d = (date ?? '').trim();
+    if (!d) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+    const real = m && (() => { const x = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])); return x.getFullYear() === Number(m[1]) && x.getMonth() === Number(m[2]) - 1 && x.getDate() === Number(m[3]); })();
+    if (!real) throw new Error('날짜는 2026-09-15처럼 적으세요');
+    if (d > now.slice(0, 10)) throw new Error('오늘보다 뒤 날짜에는 기록을 남길 수 없습니다');
+    return d;
+  }
+
   function addVisit(state, customerId, fields, now) {
     requireCustomer(state, customerId);
-    const visit = { id: state.nextId, customerId, ...visitFields(fields), createdAt: now, history: [], deletedAt: null };
+    const date = visitDate(fields.date, now);
+    const createdAt = date ? date + now.slice(10) : now;
+    const visit = { id: state.nextId, customerId, ...visitFields(fields), createdAt, history: [], deletedAt: null };
     return {
       state: { ...state, nextId: state.nextId + 1, visits: [...state.visits, visit] },
       visit,
@@ -176,7 +191,12 @@ const Store = (() => {
     const target = state.visits.find(v => v.id === visitId);
     if (!target) throw new Error('방문 기록을 찾을 수 없습니다');
     if (target.deletedAt) throw new Error('지운 기록입니다. 먼저 되살리세요');
-    const updated = { ...target, ...clean, history: [...target.history, { done: target.done, next: target.next, replacedAt: now }] };
+    // 날짜를 옮기면 이전 날짜도 이력에 남는다. 같은 날짜면 안 옮긴 것으로 본다.
+    const date = visitDate(fields.date, now);
+    const moved = date !== null && date !== target.createdAt.slice(0, 10);
+    const createdAt = moved ? date + target.createdAt.slice(10) : target.createdAt;
+    const entry = { done: target.done, next: target.next, replacedAt: now, ...(moved ? { createdAt: target.createdAt } : {}) };
+    const updated = { ...target, ...clean, createdAt, history: [...target.history, entry] };
     return {
       state: { ...state, visits: state.visits.map(v => (v.id === visitId ? updated : v)) },
       visit: updated,

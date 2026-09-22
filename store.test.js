@@ -92,6 +92,54 @@ test('방문 기록을 고치면 이전 두 칸이 이력에 남는다', () => {
   assert.deepEqual(v.history, [{ done: '탑 볼륨', next: '', replacedAt: '2026-09-11T20:00:00' }]);
 });
 
+test('못 적고 지나간 날 것은 그 날짜로 적는다 — 시각은 지금 것, 오늘 명단에는 안 센다', () => {
+  let { state, kim } = twoCustomers();
+  ({ state } = markToday(state, kim.id, '2026-09-20'));
+  let visit;
+  ({ state, visit } = addVisit(state, kim.id, { done: '지난 화요일 컷', next: '', date: '2026-09-15' }, '2026-09-20T17:42:00'));
+  assert.equal(visit.createdAt, '2026-09-15T17:42:00');
+  assert.equal(todayList(state, '2026-09-20')[0].recorded, false, '지난날 기록이니 오늘은 아직 안 적음');
+  assert.equal(visitCycle(state, kim.id, '2026-09-20').sinceLast, 5, '주기는 그 날짜로 센다');
+  ({ state, visit } = addVisit(state, kim.id, { done: '오늘 컷', next: '', date: '' }, '2026-09-20T18:00:00'));
+  assert.equal(visit.createdAt, '2026-09-20T18:00:00', '날짜를 비우면 지금');
+  ({ state, visit } = addVisit(state, kim.id, { done: '오늘 컷', next: '', date: '2026-09-20' }, '2026-09-20T18:10:00'));
+  assert.equal(visit.createdAt, '2026-09-20T18:10:00', '오늘 날짜를 고르면 지금과 같다');
+});
+
+test('방문 기록 날짜를 옮기면 시각은 그대로, 이전 날짜가 이력에 남고, 오늘 명단은 [아직 안 적음]으로 돌아간다', () => {
+  let { state, kim } = twoCustomers();
+  ({ state } = markToday(state, kim.id, '2026-09-20'));
+  let visit;
+  ({ state, visit } = addVisit(state, kim.id, { done: '컷', next: '볼륨펌' }, '2026-09-20T10:00:00'));
+  assert.equal(todayList(state, '2026-09-20')[0].recorded, true);
+  ({ state, visit } = editVisit(state, visit.id, { done: '컷', next: '볼륨펌', date: '2026-09-15' }, '2026-09-20T11:00:00'));
+  assert.equal(visit.createdAt, '2026-09-15T10:00:00', '날짜만 바뀌고 시각은 그대로');
+  assert.deepEqual(visit.history, [{ done: '컷', next: '볼륨펌', replacedAt: '2026-09-20T11:00:00', createdAt: '2026-09-20T10:00:00' }]);
+  assert.equal(todayList(state, '2026-09-20')[0].recorded, false);
+  assert.equal(visitCycle(state, kim.id, '2026-09-20').sinceLast, 5);
+  // 같은 날짜로 저장하거나 날짜를 비우면 안 옮긴 것: 이력에 날짜가 안 붙는다
+  ({ state, visit } = editVisit(state, visit.id, { done: '컷 (레이어)', next: '볼륨펌', date: '2026-09-15' }, '2026-09-20T12:00:00'));
+  assert.equal(visit.createdAt, '2026-09-15T10:00:00');
+  assert.equal('createdAt' in visit.history[1], false);
+  ({ state, visit } = editVisit(state, visit.id, { done: '컷 (레이어)', next: '' }, '2026-09-20T12:30:00'));
+  assert.equal(visit.createdAt, '2026-09-15T10:00:00');
+  // 옮긴 날짜대로 줄이 선다
+  ({ state } = addVisit(state, kim.id, { done: '그 사이 방문' }, '2026-09-18T10:00:00'));
+  assert.deepEqual(visitsOf(state, kim.id).map(v => v.done), ['그 사이 방문', '컷 (레이어)']);
+});
+
+test('오늘보다 뒤 날짜나 말이 안 되는 날짜에는 기록을 못 남긴다', () => {
+  let { state, kim } = twoCustomers();
+  const now = '2026-09-20T10:00:00';
+  assert.throws(() => addVisit(state, kim.id, { done: '컷', date: '2026-09-21' }, now), /뒤 날짜/);
+  assert.throws(() => addVisit(state, kim.id, { done: '컷', date: '2026-02-30' }, now), /날짜는/);
+  assert.throws(() => addVisit(state, kim.id, { done: '컷', date: '20260915' }, now), /날짜는/);
+  let visit;
+  ({ state, visit } = addVisit(state, kim.id, { done: '컷' }, now));
+  assert.throws(() => editVisit(state, visit.id, { done: '컷', date: '2026-09-21' }, now), /뒤 날짜/);
+  assert.equal(state.visits[0].createdAt, now, '거절되면 아무것도 안 바뀐다');
+});
+
 test('오늘 명단에 올리면 한 번만 들어가고, 날짜가 바뀌면 명단이 새로 시작된다', () => {
   let { state, kim, lee } = twoCustomers();
   ({ state } = markToday(state, kim.id, '2026-09-11'));

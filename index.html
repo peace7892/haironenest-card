@@ -40,6 +40,10 @@
   input, textarea, button { font: inherit; }
   input[type=text], textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
   input:focus, textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  /* 방문 날짜: 기본은 오늘. 못 적고 지나간 날 것은 여기서 그날로 바꾼다 */
+  input[type=date] { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: inherit; }
+  .date-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+  .date-row small { color: var(--muted); }
   textarea { min-height: 90px; resize: vertical; line-height: 1.5; }
   button { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; white-space: nowrap; }
   button.secondary { background: #fff; color: var(--accent); }

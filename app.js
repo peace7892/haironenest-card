@@ -363,6 +363,11 @@
     return `
       ${renderMemo(c, prev)}
       <form id="visit-form">
+        <div class="date-row">
+          <label style="margin:0">날짜</label>
+          <input type="date" id="visit-date" value="${today()}" max="${today()}">
+          <small>못 적고 지나간 날 것은 날짜를 그날로 바꿔 적으세요</small>
+        </div>
         <label style="margin-top:0">오늘 시술 내용과 그 이유 (필수)</label>
         <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
         <label>시술 종류 (여러 개 가능, 안 골라도 됨)</label>
@@ -482,7 +487,7 @@
     if (v.id === editingVisitId) {
       return `
         <div class="visit">
-          <div class="meta"><span>${fmt(v.createdAt)}</span><span>고치는 중</span></div>
+          <div class="meta"><span class="date-row"><label style="margin:0">날짜</label><input type="date" id="edit-date" value="${v.createdAt.slice(0, 10)}" max="${today()}"> ${v.createdAt.slice(11, 16)}</span><span>고치는 중</span></div>
           <label style="margin-top:0">오늘 시술 내용과 그 이유</label><textarea id="edit-done">${esc(v.done)}</textarea>
           <label>시술 종류</label>${renderChips('edit-kind', v.kinds ?? [])}
           <label>다음에 하기로 한 방향</label><textarea id="edit-next" style="min-height:60px">${esc(v.next)}</textarea>
@@ -493,7 +498,7 @@
     }
     const history = v.history.length === 0 ? '' : `
       <details><summary>고치기 전 내용 ${v.history.length}건</summary>
-        <div class="history">${[...v.history].reverse().map((h) => `<p><small>${fmt(h.replacedAt)}까지</small><br>${esc(h.done)}${h.next ? '<br>다음: ' + esc(h.next) : ''}</p>`).join('')}</div>
+        <div class="history">${[...v.history].reverse().map((h) => `<p><small>${fmt(h.replacedAt)}까지${h.createdAt ? ` · 그때 날짜 ${fmtDay(h.createdAt)}` : ''}</small><br>${esc(h.done)}${h.next ? '<br>다음: ' + esc(h.next) : ''}</p>`).join('')}</div>
       </details>`;
     return `
       <div class="visit">
@@ -781,7 +786,7 @@
       else if (a === 'edit') { editingVisitId = Number(btn.dataset.id); render(); $('#edit-done').focus(); }
       else if (a === 'cancel-edit') { editingVisitId = null; render(); }
       else if (a === 'save-edit') {
-        commit(Store.editVisit(state, Number(btn.dataset.id), { done: $('#edit-done').value, next: $('#edit-next').value, kinds: readChips('edit-kind') }, now()).state);
+        commit(Store.editVisit(state, Number(btn.dataset.id), { done: $('#edit-done').value, next: $('#edit-next').value, kinds: readChips('edit-kind'), date: $('#edit-date').value }, now()).state);
         editingVisitId = null; render();
       }
     } catch (err) { showMsg($('#pass-msg') || $('#identity-msg') || $('#edit-msg') || $('#profile-msg') || $('#visit-trash-msg'), err.message, 'error'); }
@@ -859,9 +864,10 @@
     if (e.target.id !== 'visit-form') return;
     e.preventDefault();
     try {
-      commit(Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value, kinds: readChips('visit-kind') }, now()).state);
+      const date = $('#visit-date').value;
+      commit(Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value, kinds: readChips('visit-kind'), date }, now()).state);
       render();
-      showMsg($('#visit-msg'), '저장했습니다', 'ok');
+      showMsg($('#visit-msg'), date && date !== today() ? `${fmtDay(date)} 기록으로 저장했습니다. [지난 방문]에 있습니다` : '저장했습니다', 'ok');
     } catch (err) { showMsg($('#visit-msg'), err.message, 'error'); }
   });
 
