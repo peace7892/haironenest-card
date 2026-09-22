@@ -45,7 +45,9 @@
   }
   const isEditing = () => editingVisitId !== null || editingProfile || editingIdentity || passForm !== null || noticeOpen;
   function showMsg(el, text, kind) { if (el) { el.textContent = text; el.className = `msg ${kind}`; } }
-  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; passForm = null; passOpen = false; noticeOpen = false; cardTab = 'today'; commit(Store.markToday(state, id, today()).state); render(); }
+  // 카드를 여는 것과 오늘 명단에 올리는 것은 다른 일이다. 지난 기록을 뒤늦게 적으려고
+  // 왼쪽에서 연 고객이 오늘 명단에 끼면 안 되니, 명단에 올리는 길은 오른쪽 위 칸과 [오늘] 버튼뿐이다.
+  function openCard(id) { view = { kind: 'card', id }; editingVisitId = null; editingProfile = false; editingIdentity = false; passForm = null; passOpen = false; noticeOpen = false; cardTab = 'today'; render(); }
 
   // ---- 왼쪽: 고객 목록 ----------------------------------------------------
   function renderCustomers() {
