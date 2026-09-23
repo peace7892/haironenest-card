@@ -86,6 +86,11 @@
   /* 시술 내용은 보여줄 때만 항목으로 나눈다 (저장은 말한 그대로) */
   .visit .field ul.lines { margin: 2px 0 0; padding-left: 18px; line-height: 1.7; }
   .visit .field ul.lines li { margin: 0; }
+  /* 이름표가 있으면 왼쪽 이름표 · 오른쪽 내용 */
+  .visit .field .chart { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin-top: 4px; align-items: baseline; }
+  .visit .field .chart .lb { font-size: 12px; font-weight: 700; color: var(--muted); }
+  .visit .field .chart .tx { line-height: 1.6; }
+  .remember .v b { font-size: 12px; font-weight: 700; color: var(--muted); }
   .history { margin: 10px 0 0; padding: 10px 12px; background: var(--bg); border-radius: 8px; font-size: 14px; color: var(--muted); }
   .history p { margin: 4px 0; white-space: pre-wrap; }
   .msg { min-height: 22px; font-size: 14px; margin-top: 8px; }

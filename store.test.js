@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, cleanDate, noteLines, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, cleanDate, noteLines, noteLabel, noteTidy, NOTE_LABELS, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -158,6 +158,59 @@ test('noteLines — 말로 받아쓴 글은 문장 끝에서 나뉘고, 숫자 �
   ]);
   assert.deepEqual(noteLines('탑 볼륨 부족해서 언더에서 무게 뺌.다음엔 볼륨펌'), ['탑 볼륨 부족해서 언더에서 무게 뺌', '다음엔 볼륨펌'], '점 뒤에 띄어쓰기가 없어도');
   assert.deepEqual(noteLines('길이 유지, 볼륨펌 상담'), ['길이 유지, 볼륨펌 상담'], '쉼표에서는 안 나눈다');
+});
+
+test('noteLines — "~고," 뒤에 쉼표가 오면 거기서도 나뉜다. 쉼표만으로는 안 나눈다', () => {
+  assert.deepEqual(noteLines('뒷머리는 상고로 라인 올려서 다듬었고, 다음번 복직하기 전에는 롤스트레이트를 권했어'),
+    ['뒷머리는 상고로 라인 올려서 다듬었고', '다음번 복직하기 전에는 롤스트레이트를 권했어']);
+  assert.deepEqual(noteLines('파랑 롤 한 바퀴 반 감고요, 120도 5분'), ['파랑 롤 한 바퀴 반 감고', '120도 5분'], '"고요,"도 (군말 요는 떨어진다)');
+  assert.deepEqual(noteLines('파랑 롤 한 바퀴 반, 120도 5분'), ['파랑 롤 한 바퀴 반, 120도 5분']);
+  assert.deepEqual(noteLines('C컬로 펴주고 중화'), ['C컬로 펴주고 중화'], '쉼표 없는 "~고 "는 그대로');
+});
+
+test('noteLabel — 조각 앞의 이름표(시술·고민·원인·다음…)를 알아본다', () => {
+  assert.deepEqual(NOTE_LABELS, ['시술', '레시피', '고민', '원인', '다음', '요청', '상태', '주의']);
+  assert.deepEqual(noteLabel('시술, 세미 투블럭, 전체 다듬기'), { label: '시술', text: '세미 투블럭, 전체 다듬기' });
+  assert.deepEqual(noteLabel('다음: 복직 전 롤스트레이트 권함'), { label: '다음', text: '복직 전 롤스트레이트 권함' });
+  assert.deepEqual(noteLabel('고민 가라앉음'), { label: '고민', text: '가라앉음' }, '띄어쓰기만 있어도');
+  assert.deepEqual(noteLabel('원인 수영 후 덜 말려 꼬불거림'), { label: '원인', text: '수영 후 덜 말려 꼬불거림' });
+  // 이름표가 아닌 것들
+  assert.deepEqual(noteLabel('시술 후 두피 따가움'), { label: null, text: '시술 후 두피 따가움' }, '"시술 후"는 이름표가 아니다');
+  assert.deepEqual(noteLabel('다음번 복직 전'), { label: null, text: '다음번 복직 전' });
+  assert.deepEqual(noteLabel('다음에 볼륨펌 상담'), { label: null, text: '다음에 볼륨펌 상담' });
+  assert.deepEqual(noteLabel('상태는 좋음'), { label: null, text: '상태는 좋음' });
+  assert.deepEqual(noteLabel('원인'), { label: null, text: '원인' }, '내용이 없으면 이름표도 없다');
+  assert.deepEqual(noteLabel('세미 투블럭'), { label: null, text: '세미 투블럭' });
+});
+
+test('noteTidy — 말하는 끝맺음을 차트 말투로 (보여줄 때만)', () => {
+  const t = noteTidy;
+  assert.equal(t('세미 투블럭 커트를 했고 전체적으로 머리를 좀 다듬었어'), '세미 투블럭 커트를 했고 전체적으로 머리를 좀 다듬었음');
+  assert.equal(t('롤스트레이트를 권했어'), '롤스트레이트를 권했음');
+  assert.equal(t('힘이 없어서 걱정하고 있어'), '힘이 없어서 걱정하고 있음');
+  assert.equal(t('덜 말려서 생기는 현상인 듯해'), '덜 말려서 생기는 현상인 듯');
+  assert.equal(t('생기는 것 같아요'), '생기는 듯');
+  assert.equal(t('가슴 윗기장 포워드 레이어드로 잘랐습니다'), '가슴 윗기장 포워드 레이어드로 잘랐음');
+  assert.equal(t('120도 5분 두었어요.'), '120도 5분 두었음', '끝의 점도 떼고');
+  assert.equal(t('C컬로 펴주고 중화했습니다'), 'C컬로 펴주고 중화했음');
+  assert.equal(t('볼륨펌을 권해'), '볼륨펌을 권함');
+  assert.equal(t('볼륨펌을 권해요'), '볼륨펌을 권함');
+  assert.equal(t('다듬었고'), '다듬었음', '"~고,"에서 잘린 조각');
+  assert.equal(t('드라이하고'), '드라이함');
+  assert.equal(t('감고요'), '감음');
+  assert.equal(t('힘이 없네요'), '힘이 없음');
+  assert.equal(t('권할 거예요'), '권할 것');
+  assert.equal(t('수영 때문이에요'), '수영 때문임');
+  assert.equal(t('양이 많아요'), '양이 많음');
+  assert.equal(t('그렇게 됐어'), '그렇게 됐음');
+  // 건드리면 안 되는 것
+  assert.equal(t('C컬로 펴주고 중화'), 'C컬로 펴주고 중화');
+  assert.equal(t('120도 5분'), '120도 5분');
+  assert.equal(t('세미 투블럭'), '세미 투블럭');
+  assert.equal(t('드라이 필요'), '드라이 필요', '"필요"의 요는 말투가 아니다');
+  assert.equal(t('복직 전 롤스트레이트 권함'), '복직 전 롤스트레이트 권함');
+  assert.equal(t('  앞머리만 정돈  '), '앞머리만 정돈');
+  assert.equal(t(''), '');
 });
 
 test('noteLines — 줄바꿈에서도 나뉘고, 빈 조각은 버리고, 한 조각이면 그대로', () => {

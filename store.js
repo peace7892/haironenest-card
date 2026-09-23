@@ -216,9 +216,37 @@ const Store = (() => {
   // 쉼표에서는 안 자른다. "파랑 롤 한 바퀴 반, 120도 5분"처럼 한 항목 안에서도 쓰이기 때문이다.
   function noteLines(text) {
     return String(text ?? '')
-      .split(/\n|(?<!\d)\s*\/\s*(?!\d)|(?<=[가-힣])\.\s*/)
+      .split(/\n|(?<!\d)\s*\/\s*(?!\d)|(?<=[가-힣])\.\s*|(?<=[가-힣]고)요?,\s*/)
       .map(s => s.trim())
       .filter(Boolean);
+  }
+
+  // 조각 앞의 이름표. "시술, 세미 투블럭" → 시술 / 세미 투블럭. 이름표 낱말은 여기 한 곳.
+  // "시술 후", "다음번", "상태는"처럼 다른 말의 일부면 이름표가 아니다.
+  const NOTE_LABELS = ['시술', '레시피', '고민', '원인', '다음', '요청', '상태', '주의'];
+  const NOT_LABEL_NEXT = /^(?:후|전|중|은|는|이|가|을|를|도|에|로|으로|과|와|부터|까지|마다)(?:\s|$)/;
+  const LABEL_RE = new RegExp(`^(${NOTE_LABELS.join('|')})(?:\\s*[:：,]\\s*|\\s+)(.+)$`);
+  function noteLabel(item) {
+    const s = String(item ?? '').trim();
+    const m = LABEL_RE.exec(s);
+    if (!m || NOT_LABEL_NEXT.test(m[2])) return { label: null, text: s };
+    return { label: m[1], text: m[2].trim() };
+  }
+
+  // 말하는 끝맺음을 차트 말투로. 보여줄 때만 쓰고 저장된 글은 건드리지 않는다.
+  // 원장이 실제로 쓰는 말이 모이면 이 표를 그에 맞춰 고친다.
+  const TIDY_RULES = [
+    [/인 듯해요?$/, '인 듯'], [/인 것 같아요?$/, '인 듯'], [/것 같아요?$/, '듯'],
+    [/거[예에]요?$/, '것'], [/이에요?$/, '임'], [/예요$/, '임'],
+    [/합니다$/, '함'], [/입니다$/, '임'], [/됩니다$/, '됨'], [/습니다$/, '음'],
+    [/하고요?$/, '함'], [/해요?$/, '함'], [/돼요?$/, '됨'], [/네요$/, '음'],
+  ];
+  function noteTidy(item) {
+    const s = String(item ?? '').trim().replace(/[.,!\s]+$/, '');
+    for (const [re, to] of TIDY_RULES) if (re.test(s)) return s.replace(re, to);
+    // 한글 뒤의 '어·아·고(요)'는 '음'으로: 다듬었어·다듬었고 → 다듬었음, 많아요 → 많음, 감고 → 감음
+    const m = /([가-힣])[어아고]요?$/.exec(s);
+    return m ? s.slice(0, m.index + 1) + '음' : s;
   }
 
   // ---- 방문 기록 지우기 ----------------------------------------------------
@@ -648,7 +676,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { KINDS, cleanDate: visitDate, noteLines, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { KINDS, cleanDate: visitDate, noteLines, noteLabel, noteTidy, NOTE_LABELS, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

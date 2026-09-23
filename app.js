@@ -423,11 +423,13 @@
     const p = c.profile;
     const memo = [p.hair, p.talk].filter(Boolean).join(' · ');
     const kinds = prev && (prev.kinds ?? []).length ? `<span class="kinds-inline">${prev.kinds.map((k) => `<span>${esc(k)}</span>`).join('')}</span>` : '';
-    // 지난번 시술은 앞 세 조각만. 전체는 [지난 방문] 탭에 있다.
-    const items = prev ? Store.noteLines(prev.done) : [];
-    const gist = items.slice(0, 3).join(' · ') + (items.length > 3 ? ` · 외 ${items.length - 3}개` : '');
+    // 지난번 시술은 앞 세 조각만. 전체는 [지난 방문] 탭에 있다. 이름표가 있으면 굵게.
+    const items = prev ? noteItems(prev.done) : [];
+    const labeled = items.some((it) => it.label);
+    const piece = (it) => (it.label ? `<b>${esc(it.label)}</b> ` : '') + esc(shorten(it.label ? dots(it.text) : it.text, 60));
+    const gist = items.slice(0, 3).map(piece).join(labeled ? ' &nbsp; ' : ' · ') + (items.length > 3 ? `${labeled ? ' &nbsp; ' : ' · '}외 ${items.length - 3}개` : '');
     const last = prev
-      ? `${fmtDay(prev.createdAt)} · ${kinds}${esc(shorten(gist, 110))}${prev.next ? ` → 다음: ${esc(shorten(prev.next, 60))}` : ''}`
+      ? `${fmtDay(prev.createdAt)} · ${kinds}${gist}${prev.next ? ` → 다음: ${esc(shorten(Store.noteTidy(prev.next), 60))}` : ''}`
       : '<i>첫 방문 — 오늘이 첫 기록입니다</i>';
     const history = c.profileHistory.length === 0 ? '' : `
       <details><summary>고치기 전 메모 ${c.profileHistory.length}건</summary>
@@ -514,11 +516,18 @@
   }
   const readChips = (name) => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map((i) => i.value);
 
-  // 저장은 그대로, 보여줄 때만 항목으로. 한 조각이면 점 없이 문장 그대로.
+  // 저장은 그대로, 보여줄 때만 항목으로. 조각마다 앞의 이름표(시술·고민·다음…)를 떼고 끝말을 차트 말투로.
+  // 이름표가 하나라도 있으면 왼쪽 이름표·오른쪽 내용의 표로, 없으면 점 목록, 한 조각이면 문장 그대로.
+  const noteItems = (text) => Store.noteLines(text).map((it) => { const { label, text: t } = Store.noteLabel(it); return { label, text: Store.noteTidy(t) }; });
+  const dots = (s) => s.replace(/,\s+/g, ' · ');   // 이름표 줄 안의 "가, 나, 다"는 "가 · 나 · 다"로
   function renderLines(text) {
-    const items = Store.noteLines(text);
-    if (items.length < 2) return `<p class="text">${esc(text)}</p>`;
-    return `<ul class="lines text">${items.map((it) => `<li>${esc(it)}</li>`).join('')}</ul>`;
+    const items = noteItems(text);
+    if (items.length === 0) return '<p class="text"></p>';
+    if (items.some((it) => it.label)) {
+      return `<div class="chart text">${items.map((it) => `<span class="lb">${esc(it.label ?? '')}</span><span class="tx">${esc(it.label ? dots(it.text) : it.text)}</span>`).join('')}</div>`;
+    }
+    if (items.length === 1) return `<p class="text">${esc(items[0].text)}</p>`;
+    return `<ul class="lines text">${items.map((it) => `<li>${esc(it.text)}</li>`).join('')}</ul>`;
   }
 
   function renderVisit(v) {
