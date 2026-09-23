@@ -215,10 +215,38 @@ const Store = (() => {
   // 줄바꿈, "/"(숫자 사이 분수는 빼고), 한글로 끝난 문장의 점(1.5처럼 숫자 뒤 점은 빼고).
   // 쉼표에서는 안 자른다. "파랑 롤 한 바퀴 반, 120도 5분"처럼 한 항목 안에서도 쓰이기 때문이다.
   function noteLines(text) {
+    const lines = rawLines(text);
+    if (isStructured(lines)) return noteOutline(text).filter(o => o.kind === 'item').map(o => o.text);
     return String(text ?? '')
       .split(/\n|(?<!\d)\s*\/\s*(?!\d)|(?<=[가-힣])\.\s*|(?<=[가-힣]고)요?,\s*/)
       .map(s => s.trim())
       .filter(Boolean);
+  }
+
+  // 글에 제목(쌍점으로 끝나는 줄)·번호 줄·"•" 같은 표시가 이미 있으면 원장이 정한 구조다.
+  // 그때는 줄바꿈에서만 나누고 그 구조를 그대로 살린다. 카드 규칙(문장 끝·"/")을 덧씌우지 않는다.
+  // 구조가 없는 글(말한 그대로)은 noteLines로 나눠 전부 항목이다.
+  const BULLET_RE = /^[•·\-*–—▪◦]\s*/;
+  const NUMBER_RE = /^\d+[.)]\s*\S/;
+  const rawLines = (text) => String(text ?? '').split('\n').map(s => s.trim()).filter(Boolean);
+  const isStructured = (lines) => lines.length >= 2 && lines.some(l => BULLET_RE.test(l) || /:$/.test(l));
+  function noteOutline(text) {
+    const lines = rawLines(text);
+    if (!isStructured(lines)) return noteLines(text).map(t => ({ kind: 'item', level: 0, text: t }));
+    const out = [];
+    let headLevel = -1;   // 마지막 제목의 단. -1이면 제목 없음
+    let subLevel = -1;    // 마지막 작은 제목(번호 줄)의 단
+    lines.forEach((line, i) => {
+      if (/:$/.test(line)) { headLevel = 0; subLevel = -1; out.push({ kind: 'heading', level: 0, text: line.replace(/\s*:$/, '') }); return; }
+      const next = lines[i + 1];
+      // 번호 줄은 뒤에 항목이 따라올 때만 작은 제목. 번호 줄만 이어지면 그냥 항목이다.
+      if (NUMBER_RE.test(line) && next && !NUMBER_RE.test(next) && !/:$/.test(next)) {
+        subLevel = headLevel + 1;
+        out.push({ kind: 'sub', level: subLevel, text: line }); return;
+      }
+      out.push({ kind: 'item', level: (subLevel >= 0 ? subLevel : headLevel) + 1, text: line.replace(BULLET_RE, '') });
+    });
+    return out;
   }
 
   // 조각 앞의 이름표. "시술, 세미 투블럭" → 시술 / 세미 투블럭. 이름표 낱말은 여기 한 곳.
@@ -676,7 +704,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { KINDS, cleanDate: visitDate, noteLines, noteLabel, noteTidy, NOTE_LABELS, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { KINDS, cleanDate: visitDate, noteLines, noteOutline, noteLabel, noteTidy, NOTE_LABELS, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

@@ -521,8 +521,15 @@
   const noteItems = (text) => Store.noteLines(text).map((it) => { const { label, text: t } = Store.noteLabel(it); return { label, text: Store.noteTidy(t) }; });
   const dots = (s) => s.replace(/,\s+/g, ' · ');   // 이름표 줄 안의 "가, 나, 다"는 "가 · 나 · 다"로
   function renderLines(text) {
-    const items = noteItems(text);
-    if (items.length === 0) return '<p class="text"></p>';
+    const outline = Store.noteOutline(text);
+    if (outline.length === 0) return '<p class="text"></p>';
+    // 글에 제목·번호·표시가 이미 있으면 그 구조 그대로. 점은 항목에만 하나.
+    if (outline.some((o) => o.kind !== 'item')) {
+      return `<div class="outline text">${outline.map((o) => o.kind === 'item'
+        ? `<div class="i l${o.level}">${esc(Store.noteTidy(o.text))}</div>`
+        : `<div class="${o.kind === 'heading' ? 'h' : 's'} l${o.level}">${esc(o.text)}</div>`).join('')}</div>`;
+    }
+    const items = outline.map((o) => { const { label, text: t } = Store.noteLabel(o.text); return { label, text: Store.noteTidy(t) }; });
     if (items.some((it) => it.label)) {
       return `<div class="chart text">${items.map((it) => `<span class="lb">${esc(it.label ?? '')}</span><span class="tx">${esc(it.label ? dots(it.text) : it.text)}</span>`).join('')}</div>`;
     }

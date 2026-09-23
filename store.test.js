@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, cleanDate, noteLines, noteLabel, noteTidy, NOTE_LABELS, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, cleanDate, noteLines, noteOutline, noteLabel, noteTidy, NOTE_LABELS, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -166,6 +166,61 @@ test('noteLines — "~고," 뒤에 쉼표가 오면 거기서도 나뉜다. 쉼�
   assert.deepEqual(noteLines('파랑 롤 한 바퀴 반 감고요, 120도 5분'), ['파랑 롤 한 바퀴 반 감고', '120도 5분'], '"고요,"도 (군말 요는 떨어진다)');
   assert.deepEqual(noteLines('파랑 롤 한 바퀴 반, 120도 5분'), ['파랑 롤 한 바퀴 반, 120도 5분']);
   assert.deepEqual(noteLines('C컬로 펴주고 중화'), ['C컬로 펴주고 중화'], '쉼표 없는 "~고 "는 그대로');
+});
+
+const STRUCTURED = [
+  '오늘 시술 내용:',
+  '1. 커트 및 형태',
+  '• 길이를 살린 상태로 라인만 살짝 정돈',
+  '• 관자놀이가 많이 가라앉은 편이라 볼륨이 관자놀이에 집중되도록 사이드뱅은 입술선에 맞춤',
+  '2. 질감 처리',
+  '• 라인이 날리지 않으면서도 머리가 가볍게 뜰 수 있도록 전체 슬라이싱 진행',
+  '고객 반응 및 다음 시술 참고 사항:',
+  '볼륨을 위해 오버존에 층을 내드렸는데 귀에 안 꽂히고 흘러내릴까 봐 조금 걱정하심',
+  '다음번에는 사이드뱅을 입술선에 반드시 맞춰서 귀 뒤로 넘겨 꽂아질 수 있도록 진행할 것',
+].join('\n');
+
+test('noteOutline — 글에 제목·번호·• 표시가 이미 있으면 그 구조를 살리고 줄바꿈에서만 나눈다', () => {
+  assert.deepEqual(noteOutline(STRUCTURED), [
+    { kind: 'heading', level: 0, text: '오늘 시술 내용' },
+    { kind: 'sub', level: 1, text: '1. 커트 및 형태' },
+    { kind: 'item', level: 2, text: '길이를 살린 상태로 라인만 살짝 정돈' },
+    { kind: 'item', level: 2, text: '관자놀이가 많이 가라앉은 편이라 볼륨이 관자놀이에 집중되도록 사이드뱅은 입술선에 맞춤' },
+    { kind: 'sub', level: 1, text: '2. 질감 처리' },
+    { kind: 'item', level: 2, text: '라인이 날리지 않으면서도 머리가 가볍게 뜰 수 있도록 전체 슬라이싱 진행' },
+    { kind: 'heading', level: 0, text: '고객 반응 및 다음 시술 참고 사항' },
+    { kind: 'item', level: 1, text: '볼륨을 위해 오버존에 층을 내드렸는데 귀에 안 꽂히고 흘러내릴까 봐 조금 걱정하심' },
+    { kind: 'item', level: 1, text: '다음번에는 사이드뱅을 입술선에 반드시 맞춰서 귀 뒤로 넘겨 꽂아질 수 있도록 진행할 것' },
+  ]);
+  assert.deepEqual(noteLines(STRUCTURED).length, 5, '항목만 다섯 개, 제목은 빠진다');
+  assert.equal(noteLines(STRUCTURED)[0], '길이를 살린 상태로 라인만 살짝 정돈', '• 표시는 떨어진다');
+});
+
+test('noteOutline — 표시 종류가 달라도, 제목 없이 •만 있어도 알아본다', () => {
+  assert.deepEqual(noteOutline('- 여성컷\n* 앞머리 정돈\n· 드라이'), [
+    { kind: 'item', level: 0, text: '여성컷' }, { kind: 'item', level: 0, text: '앞머리 정돈' }, { kind: 'item', level: 0, text: '드라이' },
+  ]);
+  assert.deepEqual(noteOutline('시술:\n여성컷. 앞머리 정돈'), [
+    { kind: 'heading', level: 0, text: '시술' }, { kind: 'item', level: 1, text: '여성컷. 앞머리 정돈' },
+  ], '구조가 있으면 문장 끝 점에서는 안 자른다');
+});
+
+test('noteOutline — 번호 줄은 뒤에 항목이 따라올 때만 작은 제목이다', () => {
+  assert.deepEqual(noteOutline('시술:\n1. 여성컷\n2. 염색'), [
+    { kind: 'heading', level: 0, text: '시술' }, { kind: 'item', level: 1, text: '1. 여성컷' }, { kind: 'item', level: 1, text: '2. 염색' },
+  ], '번호 줄만 이어지면 항목');
+  assert.deepEqual(noteOutline('1. 커트\n• 라인 정돈\n2. 펌\n• 뿌리 볼륨'), [
+    { kind: 'sub', level: 0, text: '1. 커트' }, { kind: 'item', level: 1, text: '라인 정돈' },
+    { kind: 'sub', level: 0, text: '2. 펌' }, { kind: 'item', level: 1, text: '뿌리 볼륨' },
+  ], '제목 없이 번호 줄과 항목이면 번호 줄이 작은 제목');
+});
+
+test('noteOutline — 구조가 없는 글은 지금처럼 나눠 전부 항목이다', () => {
+  assert.deepEqual(noteOutline('여성컷 / 앞머리 정돈했음. 다음엔 볼륨펌'), [
+    { kind: 'item', level: 0, text: '여성컷' }, { kind: 'item', level: 0, text: '앞머리 정돈했음' }, { kind: 'item', level: 0, text: '다음엔 볼륨펌' },
+  ]);
+  assert.deepEqual(noteOutline('1. 여성컷\n2. 염색'), [{ kind: 'item', level: 0, text: '1. 여성컷' }, { kind: 'item', level: 0, text: '2. 염색' }], '번호만 있고 표시·제목이 없으면 구조로 안 본다');
+  assert.deepEqual(noteOutline(''), []);
 });
 
 test('noteLabel — 조각 앞의 이름표(시술·고민·원인·다음…)를 알아본다', () => {

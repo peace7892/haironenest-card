@@ -91,6 +91,16 @@
   .visit .field .chart .lb { font-size: 12px; font-weight: 700; color: var(--muted); }
   .visit .field .chart .tx { line-height: 1.6; }
   .remember .v b { font-size: 12px; font-weight: 700; color: var(--muted); }
+  /* 글에 제목·번호·표시가 이미 있으면 그 구조대로: 제목은 굵게, 항목은 점 하나, 단은 들여쓰기 */
+  .visit .field .outline { margin-top: 4px; line-height: 1.6; }
+  .visit .field .outline .h { font-weight: 700; margin-top: 8px; }
+  .visit .field .outline .h:first-child { margin-top: 2px; }
+  .visit .field .outline .s { font-weight: 600; margin-top: 4px; }
+  .visit .field .outline .i { display: flex; gap: 7px; }
+  .visit .field .outline .i::before { content: '•'; color: var(--muted); flex: 0 0 auto; }
+  .visit .field .outline .l1 { margin-left: 16px; }
+  .visit .field .outline .l2 { margin-left: 32px; }
+  .visit .field .outline .l3 { margin-left: 48px; }
   .history { margin: 10px 0 0; padding: 10px 12px; background: var(--bg); border-radius: 8px; font-size: 14px; color: var(--muted); }
   .history p { margin: 4px 0; white-space: pre-wrap; }
   .msg { min-height: 22px; font-size: 14px; margin-top: 8px; }
