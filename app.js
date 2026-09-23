@@ -43,7 +43,24 @@
       .then(() => { pendingSaves -= 1; if (pendingSaves === 0) showSync(''); })
       .catch((err) => { pendingSaves -= 1; showSync(`서버 저장 실패: ${err.message} — 인터넷을 확인하고 새로고침하세요`, 'error'); });
   }
-  const isEditing = () => editingVisitId !== null || editingProfile || editingIdentity || passForm !== null || noticeOpen;
+  // ---- 적다 만 글 (임시 보관) ---------------------------------------------
+  // 상담하며 조각조각 채우는 동안 화면을 다시 그려도, 다른 카드에 갔다 와도, 새로고침해도 남는다.
+  // 서버에는 [방문 기록 저장]을 눌렀을 때만 간다. 이 컴퓨터 브라우저 안에만 둔다.
+  const DRAFT_KEY = 'haironenest-card:drafts';
+  let drafts = (() => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY)) || {}; } catch { return {}; } })();
+  function persistDrafts() { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(drafts)); } catch {} }
+  const draftOf = (id) => drafts[id] ?? null;
+  function saveDraft() {
+    if (view.kind !== 'card' || !$('#visit-form')) return;
+    const d = { date: $('#visit-date').value, done: $('#visit-done').value, kinds: readChips('visit-kind'), next: $('#visit-next').value };
+    if (!d.done.trim() && !d.next.trim() && d.kinds.length === 0) delete drafts[view.id];
+    else drafts[view.id] = d;
+    persistDrafts();
+  }
+  function clearDraft(id) { delete drafts[id]; persistDrafts(); }
+
+  // 적다 만 글이 있는 카드도 '고치는 중'이다. 창을 다시 잡아도 서버에서 다시 읽어 덮지 않는다.
+  const isEditing = () => editingVisitId !== null || editingProfile || editingIdentity || passForm !== null || noticeOpen || (view.kind === 'card' && !!drafts[view.id]);
   function showMsg(el, text, kind) { if (el) { el.textContent = text; el.className = `msg ${kind}`; } }
   // 카드를 여는 것과 오늘 명단에 올리는 것은 다른 일이다. 지난 기록을 뒤늦게 적으려고
   // 왼쪽에서 연 고객이 오늘 명단에 끼면 안 되니, 명단에 올리는 길은 오른쪽 위 칸과 [오늘] 버튼뿐이다.
@@ -368,21 +385,24 @@
   function renderTodayTab(c, visits) {
     // '지난번'은 오늘 것을 뺀 직전 방문. 오늘 기록을 남겨도 이 줄은 흔들리지 않는다.
     const prev = visits.find((v) => !v.createdAt.startsWith(today()));
+    const d = draftOf(c.id);   // 적다 만 글이 있으면 칸에 그대로 채워 둔다
     return `
       ${renderMemo(c, prev)}
       <form id="visit-form">
         <div class="date-row">
           <label style="margin:0">날짜</label>
-          <input type="date" id="visit-date" value="${today()}" max="${today()}">
+          <input type="date" id="visit-date" value="${d?.date || today()}" max="${today()}">
           <small>못 적고 지나간 날 것은 날짜를 그날로 바꿔 적으세요</small>
         </div>
         <label style="margin-top:0">오늘 시술 내용과 그 이유 (필수)</label>
-        <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로"></textarea>
+        <textarea id="visit-done" placeholder="예: 탑 볼륨 부족해서 언더에서 무게 뺌. 아침에 5분밖에 못 쓴다고 해서 드라이 없이 되는 라인으로">${esc(d?.done ?? '')}</textarea>
         <label>시술 종류 (여러 개 가능, 안 골라도 됨)</label>
-        ${renderChips('visit-kind', [])}
+        ${renderChips('visit-kind', d?.kinds ?? [])}
         <label>다음에 하기로 한 방향 (비워도 됨)</label>
-        <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담"></textarea>
-        <div class="row" style="margin-top:8px"><div class="msg" id="visit-msg"></div><button type="submit">방문 기록 저장</button></div>
+        <textarea id="visit-next" style="min-height:60px" placeholder="예: 다음엔 길이 유지하고 볼륨펌 상담">${esc(d?.next ?? '')}</textarea>
+        <div class="row" style="margin-top:8px">
+          <div class="msg ${d ? 'draft' : ''}" id="visit-msg">${d ? '적다 만 글입니다. 아직 저장 안 됨 · <button type="button" class="link" data-action="discard-draft">지우고 새로 적기</button>' : ''}</div>
+          <button type="submit">방문 기록 저장</button></div>
       </form>
       ${renderPass(c)}
       ${renderNotice(c)}`;
@@ -403,8 +423,11 @@
     const p = c.profile;
     const memo = [p.hair, p.talk].filter(Boolean).join(' · ');
     const kinds = prev && (prev.kinds ?? []).length ? `<span class="kinds-inline">${prev.kinds.map((k) => `<span>${esc(k)}</span>`).join('')}</span>` : '';
+    // 지난번 시술은 앞 세 조각만. 전체는 [지난 방문] 탭에 있다.
+    const items = prev ? Store.noteLines(prev.done) : [];
+    const gist = items.slice(0, 3).join(' · ') + (items.length > 3 ? ` · 외 ${items.length - 3}개` : '');
     const last = prev
-      ? `${fmtDay(prev.createdAt)} · ${kinds}${esc(shorten(prev.done, 90))}${prev.next ? ` → 다음: ${esc(shorten(prev.next, 60))}` : ''}`
+      ? `${fmtDay(prev.createdAt)} · ${kinds}${esc(shorten(gist, 110))}${prev.next ? ` → 다음: ${esc(shorten(prev.next, 60))}` : ''}`
       : '<i>첫 방문 — 오늘이 첫 기록입니다</i>';
     const history = c.profileHistory.length === 0 ? '' : `
       <details><summary>고치기 전 메모 ${c.profileHistory.length}건</summary>
@@ -491,6 +514,13 @@
   }
   const readChips = (name) => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map((i) => i.value);
 
+  // 저장은 그대로, 보여줄 때만 항목으로. 한 조각이면 점 없이 문장 그대로.
+  function renderLines(text) {
+    const items = Store.noteLines(text);
+    if (items.length < 2) return `<p class="text">${esc(text)}</p>`;
+    return `<ul class="lines text">${items.map((it) => `<li>${esc(it)}</li>`).join('')}</ul>`;
+  }
+
   function renderVisit(v) {
     if (v.id === editingVisitId) {
       return `
@@ -515,8 +545,8 @@
             <button type="button" class="link" data-action="edit" data-id="${v.id}">고치기</button>
             <button type="button" class="link danger" data-action="del-visit" data-id="${v.id}">지우기</button>
           </span></div>
-        <div class="field"><b>시술 내용과 이유${(v.kinds ?? []).length ? `<span class="kinds-inline">${v.kinds.map((k) => `<span>${esc(k)}</span>`).join('')}</span>` : ''}</b><p>${esc(v.done)}</p></div>
-        ${v.next ? `<div class="field"><b>다음 방향</b><p>${esc(v.next)}</p></div>` : ''}
+        <div class="field"><b>시술 내용과 이유${(v.kinds ?? []).length ? `<span class="kinds-inline">${v.kinds.map((k) => `<span>${esc(k)}</span>`).join('')}</span>` : ''}</b>${renderLines(v.done)}</div>
+        ${v.next ? `<div class="field"><b>다음 방향</b>${renderLines(v.next)}</div>` : ''}
         ${history}
       </div>`;
   }
@@ -531,6 +561,7 @@
 
   function render() {
     if (view.kind === 'card' && !customerOf(view.id)) view = { kind: 'today' };
+    for (const id of Object.keys(drafts)) if (!customerOf(Number(id))) clearDraft(id);
     renderCustomers();
     renderTrash();
     renderTodayPanel();
@@ -796,6 +827,7 @@
       }
       else if (a === 'edit') { editingVisitId = Number(btn.dataset.id); render(); $('#edit-done').focus(); }
       else if (a === 'cancel-edit') { editingVisitId = null; render(); }
+      else if (a === 'discard-draft') { clearDraft(view.id); render(); }
       else if (a === 'save-edit') {
         commit(Store.editVisit(state, Number(btn.dataset.id), { done: $('#edit-done').value, next: $('#edit-next').value, kinds: readChips('edit-kind'), date: $('#edit-date').value }, now()).state);
         editingVisitId = null; render();
@@ -841,10 +873,12 @@
   });
 
   $('#card').addEventListener('input', (e) => {
+    if (e.target.closest('#visit-form')) { saveDraft(); return; }
     if (e.target.closest('.notice')) refreshNotice();
   });
 
   $('#card').addEventListener('change', (e) => {
+    if (e.target.closest('#visit-form')) { saveDraft(); return; }   // 칩·날짜
     if (e.target.id === 'notice-topup-on') { $('#notice-topup').hidden = !e.target.checked; refreshNotice(); return; }
     if (e.target.id === 'notice-date') { refreshNotice(); return; }
     // 다시 그리지 않는다. 그리면 지금 치던 칸에서 커서가 날아간다.
@@ -878,6 +912,7 @@
     try {
       const date = $('#visit-date').value;
       commit(Store.addVisit(state, view.id, { done: $('#visit-done').value, next: $('#visit-next').value, kinds: readChips('visit-kind'), date }, now()).state);
+      clearDraft(view.id);   // 저장됐으니 임시 글은 비운다
       render();
       showMsg($('#visit-msg'), date && date !== today() ? `${fmtDay(date)} 기록으로 저장했습니다. [지난 방문]에 있습니다` : '저장했습니다', 'ok');
     } catch (err) { showMsg($('#visit-msg'), err.message, 'error'); }

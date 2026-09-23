@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, cleanDate, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, cleanDate, noteLines, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -138,6 +138,34 @@ test('오늘보다 뒤 날짜나 말이 안 되는 날짜에는 기록을 못 �
   ({ state, visit } = addVisit(state, kim.id, { done: '컷' }, now));
   assert.throws(() => editVisit(state, visit.id, { done: '컷', date: '2026-09-21' }, now), /뒤 날짜/);
   assert.equal(state.visits[0].createdAt, now, '거절되면 아무것도 안 바뀐다');
+});
+
+test('noteLines — "/"로 끊어 적은 기록은 그 자리에서 나뉜다', () => {
+  assert.deepEqual(noteLines('가슴윗기장 포워드레이어드 / 매직 후 / 파랑 한바퀴반 / 120도 5분 / C컬로 펴주고 중화'),
+    ['가슴윗기장 포워드레이어드', '매직 후', '파랑 한바퀴반', '120도 5분', 'C컬로 펴주고 중화']);
+  assert.deepEqual(noteLines('여성컷/앞머리 정돈'), ['여성컷', '앞머리 정돈'], '띄어쓰기 없이도');
+  assert.deepEqual(noteLines('1/2바퀴 더 감음'), ['1/2바퀴 더 감음'], '숫자 사이 /는 분수라 안 나눈다');
+});
+
+test('noteLines — 말로 받아쓴 글은 문장 끝에서 나뉘고, 숫자 속 점은 안 건드린다', () => {
+  const said = '가슴 윗기장 포워드 레이어드로 잘랐습니다. 매직 후에 파랑 롤로 한 바퀴 반 감았고 120도 5분 두었어요. 뿌리 쪽은 1.5바퀴 더 감음. C컬로 펴주고 중화했습니다. 옆 라인은 얼굴 따라 짧게 정돈했음.';
+  assert.deepEqual(noteLines(said), [
+    '가슴 윗기장 포워드 레이어드로 잘랐습니다',
+    '매직 후에 파랑 롤로 한 바퀴 반 감았고 120도 5분 두었어요',
+    '뿌리 쪽은 1.5바퀴 더 감음',
+    'C컬로 펴주고 중화했습니다',
+    '옆 라인은 얼굴 따라 짧게 정돈했음',
+  ]);
+  assert.deepEqual(noteLines('탑 볼륨 부족해서 언더에서 무게 뺌.다음엔 볼륨펌'), ['탑 볼륨 부족해서 언더에서 무게 뺌', '다음엔 볼륨펌'], '점 뒤에 띄어쓰기가 없어도');
+  assert.deepEqual(noteLines('길이 유지, 볼륨펌 상담'), ['길이 유지, 볼륨펌 상담'], '쉼표에서는 안 나눈다');
+});
+
+test('noteLines — 줄바꿈에서도 나뉘고, 빈 조각은 버리고, 한 조각이면 그대로', () => {
+  assert.deepEqual(noteLines('여성컷\n앞머리 정돈\n\n'), ['여성컷', '앞머리 정돈']);
+  assert.deepEqual(noteLines('여성컷 / 앞머리 정돈했음. 다음엔 볼륨펌'), ['여성컷', '앞머리 정돈했음', '다음엔 볼륨펌'], '규칙이 섞여도');
+  assert.deepEqual(noteLines('탑 볼륨 부족해서 언더에서 무게 뺌'), ['탑 볼륨 부족해서 언더에서 무게 뺌']);
+  assert.deepEqual(noteLines(''), []);
+  assert.deepEqual(noteLines(null), []);
 });
 
 test('오늘 명단에 올리면 한 번만 들어가고, 날짜가 바뀌면 명단이 새로 시작된다', () => {

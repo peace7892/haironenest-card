@@ -210,6 +210,17 @@ const Store = (() => {
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.id - a.id));
   }
 
+  // ---- 읽기 쉽게 줄 나누기 ----------------------------------------------
+  // 저장은 말한 그대로 두고, 보여줄 때만 항목으로 나눈다. 자르는 자리는 셋뿐이다:
+  // 줄바꿈, "/"(숫자 사이 분수는 빼고), 한글로 끝난 문장의 점(1.5처럼 숫자 뒤 점은 빼고).
+  // 쉼표에서는 안 자른다. "파랑 롤 한 바퀴 반, 120도 5분"처럼 한 항목 안에서도 쓰이기 때문이다.
+  function noteLines(text) {
+    return String(text ?? '')
+      .split(/\n|(?<!\d)\s*\/\s*(?!\d)|(?<=[가-힣])\.\s*/)
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+
   // ---- 방문 기록 지우기 ----------------------------------------------------
   // 고객 지우기와 같은 두 단계. [지우기]는 감추기만 하고, [완전히 지우기]라야 없앤다.
 
@@ -637,7 +648,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { KINDS, cleanDate: visitDate, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { KINDS, cleanDate: visitDate, noteLines, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

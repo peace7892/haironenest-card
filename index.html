@@ -83,11 +83,16 @@
   .visit .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 14px; margin-bottom: 8px; }
   .visit .field b { display: block; font-size: 13px; color: var(--muted); font-weight: 600; margin: 8px 0 2px; }
   .visit .field p { margin: 0; white-space: pre-wrap; line-height: 1.6; }
+  /* 시술 내용은 보여줄 때만 항목으로 나눈다 (저장은 말한 그대로) */
+  .visit .field ul.lines { margin: 2px 0 0; padding-left: 18px; line-height: 1.7; }
+  .visit .field ul.lines li { margin: 0; }
   .history { margin: 10px 0 0; padding: 10px 12px; background: var(--bg); border-radius: 8px; font-size: 14px; color: var(--muted); }
   .history p { margin: 4px 0; white-space: pre-wrap; }
   .msg { min-height: 22px; font-size: 14px; margin-top: 8px; }
   .msg.error { color: var(--danger); }
   .msg.ok { color: var(--ok); }
+  .msg.draft { color: var(--muted); }
+  .msg.draft .link { font-size: 13px; }
   details summary { cursor: pointer; color: var(--muted); margin: 10px 0 6px; }
   .newform { display: grid; gap: 8px; }
   h3 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 24px 0 10px; }
