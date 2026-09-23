@@ -431,16 +431,12 @@
     const last = prev
       ? `${fmtDay(prev.createdAt)} · ${kinds}${gist}${prev.next ? ` → 다음: ${esc(shorten(Store.noteTidy(prev.next), 60))}` : ''}`
       : '<i>첫 방문 — 오늘이 첫 기록입니다</i>';
-    const history = c.profileHistory.length === 0 ? '' : `
-      <details><summary>고치기 전 메모 ${c.profileHistory.length}건</summary>
-        <div class="history">${[...c.profileHistory].reverse().map((h) => `<p><small>${fmt(h.replacedAt)}까지</small><br>${esc([h.hair, h.talk].filter(Boolean).join(' · ')) || '—'}</p>`).join('')}</div>
-      </details>`;
+    // 고치기 전 내용(profileHistory)은 기록에는 남지만 화면에는 안 보인다. 원장이 볼 일이 없다고 해서(09-23).
     return `
       <div class="remember">
         <div class="line"><span class="k">메모</span><span class="v">${esc(memo) || '<i>아직 없음</i>'}</span>
           <button type="button" class="link" data-action="edit-profile">${memo ? '고치기' : '적기'}</button></div>
         <div class="line"><span class="k">지난번</span><span class="v">${last}</span></div>
-        ${history}
       </div>`;
   }
 
@@ -550,10 +546,7 @@
             <button type="button" data-action="save-edit" data-id="${v.id}">고친 내용 저장</button></div>
         </div>`;
     }
-    const history = v.history.length === 0 ? '' : `
-      <details><summary>고치기 전 내용 ${v.history.length}건</summary>
-        <div class="history">${[...v.history].reverse().map((h) => `<p><small>${fmt(h.replacedAt)}까지${h.createdAt ? ` · 그때 날짜 ${fmtDay(h.createdAt)}` : ''}</small><br>${esc(h.done)}${h.next ? '<br>다음: ' + esc(h.next) : ''}</p>`).join('')}</div>
-      </details>`;
+    // 고치기 전 내용(v.history)은 기록에는 남지만 화면에는 안 보인다. 원장이 볼 일이 없다고 해서(09-23).
     return `
       <div class="visit">
         <div class="meta"><span>${fmt(v.createdAt)}${v.sincePrev === null ? ' · 첫 방문' : ` · 이전 방문에서 ${v.sincePrev}일 만`}</span>
@@ -563,7 +556,6 @@
           </span></div>
         <div class="field"><b>시술 내용과 이유${(v.kinds ?? []).length ? `<span class="kinds-inline">${v.kinds.map((k) => `<span>${esc(k)}</span>`).join('')}</span>` : ''}</b>${renderLines(v.done)}</div>
         ${v.next ? `<div class="field"><b>다음 방향</b>${renderLines(v.next)}</div>` : ''}
-        ${history}
       </div>`;
   }
 
