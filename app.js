@@ -521,8 +521,9 @@
     if (outline.length === 0) return '<p class="text"></p>';
     // 글에 제목·번호·표시가 이미 있으면 그 구조 그대로. 점은 항목에만 하나.
     if (outline.some((o) => o.kind !== 'item')) {
-      return `<div class="outline text">${outline.map((o) => o.kind === 'item'
-        ? `<div class="i l${o.level}">${esc(Store.noteTidy(o.text))}</div>`
+      // 항목 안의 "옆머리: 13mm"는 이름을 굵게
+      const item = (o) => { const { key, text } = Store.noteInline(o.text); return `<div class="i l${o.level}">${key ? `<b>${esc(key)}</b>` : ''}${esc(Store.noteTidy(text))}</div>`; };
+      return `<div class="outline text">${outline.map((o) => o.kind === 'item' ? item(o)
         : `<div class="${o.kind === 'heading' ? 'h' : 's'} l${o.level}">${esc(o.text)}</div>`).join('')}</div>`;
     }
     const items = outline.map((o) => { const { label, text: t } = Store.noteLabel(o.text); return { label, text: Store.noteTidy(t) }; });

@@ -228,25 +228,38 @@ const Store = (() => {
   // 구조가 없는 글(말한 그대로)은 noteLines로 나눠 전부 항목이다.
   const BULLET_RE = /^[•·\-*–—▪◦]\s*/;
   const NUMBER_RE = /^\d+[.)]\s*\S/;
+  // 붙임 글자: (a) (b) a. b) 가. 나. ① ② — 번호 줄 밑의 세부 항목. "컷."처럼 보통 글자 뒤 점은 아니다.
+  const LETTER_RE = /^(?:\([a-zA-Z가-힣]\)|[a-zA-Z][.)]|[가나다라마바사아자차카타파하][.)]|[①-⑳㉠-㉻])\s*/;
   const rawLines = (text) => String(text ?? '').split('\n').map(s => s.trim()).filter(Boolean);
-  const isStructured = (lines) => lines.length >= 2 && lines.some(l => BULLET_RE.test(l) || /:$/.test(l));
+  const isStructured = (lines) => lines.length >= 2 && lines.some(l => BULLET_RE.test(l) || LETTER_RE.test(l) || /:$/.test(l));
+  // 번호 줄이 제목인가: 쌍점 없이 짧고(16자 이하), 뒤에 번호 아닌 줄이 따라올 때만. "1. 옆머리: 투블럭"은 내용이 있는 항목이다.
+  const isNumberedTitle = (line, next) => NUMBER_RE.test(line) && !/[:：]/.test(line) && line.replace(/^\d+[.)]\s*/, '').length <= 16
+    && !!next && !NUMBER_RE.test(next) && !/:$/.test(next);
   function noteOutline(text) {
-    const lines = rawLines(text);
-    if (!isStructured(lines)) return noteLines(text).map(t => ({ kind: 'item', level: 0, text: t }));
+    if (!isStructured(rawLines(text))) return noteLines(text).map(t => ({ kind: 'item', level: 0, text: t }));
+    const all = String(text ?? '').split('\n').map(s => s.trim());   // 빈 줄도 남긴다: 덩어리의 경계
     const out = [];
     let headLevel = -1;   // 마지막 제목의 단. -1이면 제목 없음
-    let subLevel = -1;    // 마지막 작은 제목(번호 줄)의 단
-    lines.forEach((line, i) => {
-      if (/:$/.test(line)) { headLevel = 0; subLevel = -1; out.push({ kind: 'heading', level: 0, text: line.replace(/\s*:$/, '') }); return; }
-      const next = lines[i + 1];
-      // 번호 줄은 뒤에 항목이 따라올 때만 작은 제목. 번호 줄만 이어지면 그냥 항목이다.
-      if (NUMBER_RE.test(line) && next && !NUMBER_RE.test(next) && !/:$/.test(next)) {
-        subLevel = headLevel + 1;
-        out.push({ kind: 'sub', level: subLevel, text: line }); return;
-      }
-      out.push({ kind: 'item', level: (subLevel >= 0 ? subLevel : headLevel) + 1, text: line.replace(BULLET_RE, '') });
+    let subLevel = -1;    // 마지막 작은 제목의 단
+    let numLevel = -1;    // 마지막 번호 항목의 단 (그 밑에 (a)(b)·• 가 붙는다)
+    all.forEach((line, i) => {
+      if (!line) { subLevel = -1; numLevel = -1; return; }   // 빈 줄: 들여쓰기를 푼다
+      if (/:$/.test(line)) { headLevel = 0; subLevel = -1; numLevel = -1; out.push({ kind: 'heading', level: 0, text: line.replace(/\s*:$/, '') }); return; }
+      const next = all.slice(i + 1).find(Boolean);
+      if (isNumberedTitle(line, next)) { subLevel = headLevel + 1; numLevel = -1; out.push({ kind: 'sub', level: subLevel, text: line }); return; }
+      const base = (subLevel >= 0 ? subLevel : headLevel) + 1;
+      if (NUMBER_RE.test(line)) { numLevel = base; out.push({ kind: 'item', level: base, text: line }); return; }
+      const under = numLevel >= 0 ? numLevel + 1 : base;
+      if (LETTER_RE.test(line)) { out.push({ kind: 'item', level: under, text: line.replace(LETTER_RE, '') }); return; }
+      out.push({ kind: 'item', level: under, text: line.replace(BULLET_RE, '') });
     });
     return out;
+  }
+
+  // 항목 안의 "짧은말: 내용" — 옆머리: 13mm. 이름은 여덟 자까지. 보여줄 때 이름을 굵게 한다.
+  function noteInline(item) {
+    const m = /^([^:：]{1,8}?)\s*[:：]\s*(.+)$/.exec(String(item ?? '').trim());
+    return m ? { key: m[1].trim(), text: m[2].trim() } : { key: null, text: String(item ?? '').trim() };
   }
 
   // 조각 앞의 이름표. "시술, 세미 투블럭" → 시술 / 세미 투블럭. 이름표 낱말은 여기 한 곳.
@@ -274,7 +287,11 @@ const Store = (() => {
     for (const [re, to] of TIDY_RULES) if (re.test(s)) return s.replace(re, to);
     // 한글 뒤의 '어·아·고(요)'는 '음'으로: 다듬었어·다듬었고 → 다듬었음, 많아요 → 많음, 감고 → 감음
     const m = /([가-힣])[어아고]요?$/.exec(s);
-    return m ? s.slice(0, m.index + 1) + '음' : s;
+    if (m) return s.slice(0, m.index + 1) + '음';
+    // 과거형 뒤의 '지(요)'도: 권유했지 → 권유했음. "두 가지"처럼 받침 ㅆ이 없으면 그대로
+    const z = /([가-힣])지요?$/.exec(s);
+    if (z && (z[1].charCodeAt(0) - 0xAC00) % 28 === 20) return s.slice(0, z.index + 1) + '음';
+    return s;
   }
 
   // ---- 방문 기록 지우기 ----------------------------------------------------
@@ -704,7 +721,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { KINDS, cleanDate: visitDate, noteLines, noteOutline, noteLabel, noteTidy, NOTE_LABELS, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { KINDS, cleanDate: visitDate, noteLines, noteOutline, noteInline, noteLabel, noteTidy, NOTE_LABELS, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

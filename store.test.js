@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, cleanDate, noteLines, noteOutline, noteLabel, noteTidy, NOTE_LABELS, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, cleanDate, noteLines, noteOutline, noteInline, noteLabel, noteTidy, NOTE_LABELS, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -215,6 +215,39 @@ test('noteOutline — 번호 줄은 뒤에 항목이 따라올 때만 작은 제
   ], '제목 없이 번호 줄과 항목이면 번호 줄이 작은 제목');
 });
 
+const TYPELESS = ['민준이 머리 스타일 기록:', '', '1. 옆머리: 투블럭', '(a) 옆머리: 13mm', '(b) 구레나룻: 6mm', '2. 뒷머리: 6mm', '(a) 상고 스타일로 올려 치는 것을 선호함', '3. 앞머리: 아빠가 잘라온 앞머리 길이에 맞춰서 투블럭으로 다듬음', '', '• 특이사항: 다음번 머리할 때 펌 추천'].join('\n');
+
+test('noteOutline — 받아쓰기 앱이 만든 번호·(a)(b) 구조: 쌍점 있는 번호 줄은 항목, 붙임 글자는 떼고 그 밑에, 빈 줄은 덩어리 경계', () => {
+  assert.deepEqual(noteOutline(TYPELESS), [
+    { kind: 'heading', level: 0, text: '민준이 머리 스타일 기록' },
+    { kind: 'item', level: 1, text: '1. 옆머리: 투블럭' },
+    { kind: 'item', level: 2, text: '옆머리: 13mm' },
+    { kind: 'item', level: 2, text: '구레나룻: 6mm' },
+    { kind: 'item', level: 1, text: '2. 뒷머리: 6mm' },
+    { kind: 'item', level: 2, text: '상고 스타일로 올려 치는 것을 선호함' },
+    { kind: 'item', level: 1, text: '3. 앞머리: 아빠가 잘라온 앞머리 길이에 맞춰서 투블럭으로 다듬음' },
+    { kind: 'item', level: 1, text: '특이사항: 다음번 머리할 때 펌 추천' },
+  ]);
+  assert.deepEqual(noteOutline('1. 옆머리: 투블럭\n(a) 13mm\nb. 6mm\n가. 상고'), [
+    { kind: 'item', level: 0, text: '1. 옆머리: 투블럭' }, { kind: 'item', level: 1, text: '13mm' }, { kind: 'item', level: 1, text: '6mm' }, { kind: 'item', level: 1, text: '상고' },
+  ], '제목·표시가 없어도 (a) b. 가. 가 있으면 구조로 본다');
+  assert.deepEqual(noteOutline('1. 옆머리: 투블럭\n• 13mm\n\n• 특이사항'), [
+    { kind: 'item', level: 0, text: '1. 옆머리: 투블럭' }, { kind: 'item', level: 1, text: '13mm' }, { kind: 'item', level: 0, text: '특이사항' },
+  ], '빈 줄 없이 이어진 •는 번호 항목 밑에, 빈 줄 뒤의 •는 제자리로');
+  assert.deepEqual(noteOutline('1. 컷. 앞머리 정돈\n• 라인'), [
+    { kind: 'sub', level: 0, text: '1. 컷. 앞머리 정돈' }, { kind: 'item', level: 1, text: '라인' },
+  ], '"컷."처럼 한 글자 뒤 점은 붙임 글자가 아니다');
+});
+
+test('noteInline — 항목 안의 "짧은말: 내용"을 이름과 내용으로 나눈다', () => {
+  assert.deepEqual(noteInline('옆머리: 13mm'), { key: '옆머리', text: '13mm' });
+  assert.deepEqual(noteInline('1. 옆머리: 투블럭'), { key: '1. 옆머리', text: '투블럭' });
+  assert.deepEqual(noteInline('특이사항 : 다음번 머리할 때 펌 추천'), { key: '특이사항', text: '다음번 머리할 때 펌 추천' });
+  assert.deepEqual(noteInline('상고 스타일로 올려 치는 것을 선호함'), { key: null, text: '상고 스타일로 올려 치는 것을 선호함' });
+  assert.deepEqual(noteInline('고객 반응 및 다음 시술 참고 사항: 볼륨'), { key: null, text: '고객 반응 및 다음 시술 참고 사항: 볼륨' }, '여덟 자를 넘으면 이름이 아니다');
+  assert.deepEqual(noteInline('옆머리:'), { key: null, text: '옆머리:' }, '내용이 없으면 그대로');
+});
+
 test('noteOutline — 구조가 없는 글은 지금처럼 나눠 전부 항목이다', () => {
   assert.deepEqual(noteOutline('여성컷 / 앞머리 정돈했음. 다음엔 볼륨펌'), [
     { kind: 'item', level: 0, text: '여성컷' }, { kind: 'item', level: 0, text: '앞머리 정돈했음' }, { kind: 'item', level: 0, text: '다음엔 볼륨펌' },
@@ -258,6 +291,9 @@ test('noteTidy — 말하는 끝맺음을 차트 말투로 (보여줄 때만)', 
   assert.equal(t('수영 때문이에요'), '수영 때문임');
   assert.equal(t('양이 많아요'), '양이 많음');
   assert.equal(t('그렇게 됐어'), '그렇게 됐음');
+  assert.equal(t('다음번에 파마하는 것을 권유했지'), '다음번에 파마하는 것을 권유했음', '"~했지"도');
+  assert.equal(t('권유했지요'), '권유했음');
+  assert.equal(t('두 가지'), '두 가지', '과거형이 아닌 "지"는 그대로');
   // 건드리면 안 되는 것
   assert.equal(t('C컬로 펴주고 중화'), 'C컬로 펴주고 중화');
   assert.equal(t('120도 5분'), '120도 5분');
