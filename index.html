@@ -98,7 +98,8 @@
   .visit .field .outline .s { font-weight: 600; margin-top: 4px; }
   .visit .field .outline .i { display: flex; gap: 7px; }
   .visit .field .outline .i::before { content: '•'; color: var(--muted); flex: 0 0 auto; }
-  .visit .field .outline .i b { font-weight: 700; margin-right: 8px; white-space: nowrap; }
+  /* .visit .field b는 칸 제목용(블록·작은 글씨)이라 항목 안의 이름은 따로 되돌린다 */
+  .visit .field .outline .i b { display: inline; font-size: inherit; color: inherit; font-weight: 700; margin: 0 8px 0 0; white-space: nowrap; }
   .visit .field .outline .l1 { margin-left: 16px; }
   .visit .field .outline .l2 { margin-left: 32px; }
   .visit .field .outline .l3 { margin-left: 48px; }
