@@ -134,6 +134,11 @@
       <details class="notice" ${noticeOpen ? 'open' : ''}>
         <summary>정액권 안내문 만들기 <small>잔액 ${Store.formatWon(bal)}</small></summary>
         <div class="notice-body">
+          <div class="date-row">
+            <label style="margin:0">시술·사용 날짜</label>
+            <input type="date" id="notice-date" value="${today()}" max="${today()}">
+            <small>문자에 적히고, 정액권 내역에도 이 날짜로 남습니다</small>
+          </div>
           <label style="margin-top:0">지금 남은 잔액 (시술 전, 핸드SOS 기준)</label>
           <div class="row">
             <input type="text" id="notice-prev" class="won" inputmode="numeric" value="${bal > 0 ? Store.comma(bal) : ''}" placeholder="예: 300000 (카드 만들기 전에 끊은 정액권이면 여기 적으세요)" autocomplete="off">
@@ -194,6 +199,7 @@
     return {
       head: $('#notice-head').value,
       tail: $('#notice-tail').value,
+      date: $('#notice-date') ? $('#notice-date').value : today(),
       prev: prevRaw === '' ? Store.passBalance(state, view.id) : Number(digitsOf(prevRaw)) || 0,
       prevTyped: prevRaw !== '',
       items,
@@ -720,16 +726,19 @@
         // 문자만 나가고 숫자는 안 맞는 일이 생기지 않는다.
         let next = state;
         try {
+          // 문자에 적는 날짜로 정액권 내역도 남긴다. 시각은 지금 것 (뒤 날짜는 cleanDate가 막는다).
+          const day = Store.cleanDate(f.date, now());
+          const at = day ? day + now().slice(10) : now();
           if (a === 'notice-apply') {
             // 원장이 적은 잔액이 카드 잔액과 다르면 먼저 그 금액으로 맞춘다 (차이만큼 내역 한 줄).
-            if (f.prevTyped) next = Store.setPassBalance(next, view.id, f.prev, now()).state;
+            if (f.prevTyped) next = Store.setPassBalance(next, view.id, f.prev, at).state;
             if (f.topup) {
-              next = Store.chargePass(next, view.id, { amount: f.topup.amount, note: f.topup.name || '정액권 충전' }, now()).state;
+              next = Store.chargePass(next, view.id, { amount: f.topup.amount, note: f.topup.name || '정액권 충전' }, at).state;
               next = Store.rememberProduct(next, f.topup).state;
             }
             if (used) {
               const what = f.items.map((it) => it.name).filter(Boolean).join(' · ') || '시술';
-              next = Store.usePass(next, view.id, { amount: used, note: what }, now()).state;
+              next = Store.usePass(next, view.id, { amount: used, note: what }, at).state;
             }
           }
         } catch (err) { showMsg($('#notice-msg'), err.message, 'error'); return; }
@@ -837,6 +846,7 @@
 
   $('#card').addEventListener('change', (e) => {
     if (e.target.id === 'notice-topup-on') { $('#notice-topup').hidden = !e.target.checked; refreshNotice(); return; }
+    if (e.target.id === 'notice-date') { refreshNotice(); return; }
     // 다시 그리지 않는다. 그리면 지금 치던 칸에서 커서가 날아간다.
     if (e.target.id === 'notice-head' || e.target.id === 'notice-tail') {
       commit(Store.setSettings(state, { head: $('#notice-head').value, tail: $('#notice-tail').value }).state);

@@ -372,8 +372,11 @@ const Store = (() => {
     return (Number(prev) || 0) + (topup ? (Number(topup.amount) || 0) : 0) - noticeUsed(items);
   }
 
-  function buildNotice({ head, tail, prev, items, topup }) {
+  // date(YYYY-MM-DD)를 주면 시술내역 제목에 붙는다: 손님이 언제 시술받고 언제 정액권을 썼는지.
+  // 원장이 2026-09-22에 넣어 달라고 한 것. 그 외 문장은 쓰던 문자 그대로.
+  function buildNotice({ head, tail, prev, items, topup, date }) {
     const rows = noticeItems(items);
+    const day = (date ?? '').trim() ? ` (${date.trim().slice(0, 10).replace(/-/g, '.')})` : '';
     const L = [];
     L.push(`* ${(head ?? '').trim() || '정액권 안내드려요'} *`);
     L.push('');
@@ -384,7 +387,7 @@ const Store = (() => {
       if ((topup.gift ?? '').trim()) L.push(`- ${topup.gift.trim()} 선물`);
     }
     L.push('');
-    L.push('* 시술내역 *');
+    L.push(`* 시술내역${day} *`);
     if (rows.length === 0) L.push('(시술 항목을 적어 주세요)');
     else if (rows.length === 1) L.push(`${rows[0].name} ${comma(rows[0].amount)} 원 사용하셔서`);
     else {
@@ -634,7 +637,7 @@ const Store = (() => {
     return { date: '', entries: [] };
   }
 
-  return { KINDS, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
+  return { KINDS, cleanDate: visitDate, monthlyStats, retention, overdueCustomers, setPassBalance, createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize };
 })();
 
 if (typeof module !== 'undefined') module.exports = Store;

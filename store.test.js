@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createState, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
+const { createState, cleanDate, timeSlots, formatWon, comma, buildNotice, noticeRemain, noticeUsed, setSettings, rememberProduct, findProduct, cleanAmount, chargePass, usePass, deletePass, passEntriesOf, passBalance, passSummary, visitsWithGaps, visitCycle, addCustomer, editCustomer, deleteCustomer, restoreCustomer, purgeCustomer, deletedCustomers, maskPhone, findCustomers, setProfile, addVisit, editVisit, deleteVisit, restoreVisit, purgeVisit, deletedVisitsOf, sweepDeletedVisits, daysLeftInTrash, visitsOf, markToday, setTodayTime, unmarkToday, todayList, serialize, deserialize } = require('./store.js');
 
 test('이름과 전화번호로 고객을 만든다', () => {
   const s0 = createState();
@@ -883,6 +883,39 @@ test('충전과 시술 한 건이 있는 안내문이 쓰던 문장 그대로 �
     '',
     '남은 정액권은 2,464,400원입니다 : D',
   ].join('\n'));
+});
+
+test('날짜를 주면 시술내역 제목에 그 날짜가 붙는다 — 언제 시술받고 언제 정액권을 썼는지', () => {
+  const got = buildNotice({
+    ...TPL, prev: 194400, date: '2026-09-22',
+    items: [{ name: '매직C컬', amount: 230000 }],
+    topup: { name: 'Gold 예약권', amount: 2500000, terms: '사용기한:~18개월 / 우선예약권:소진시까지', gift: '1000ml 프로틴트리트먼트 & 750ml 두피트리트먼트' },
+  });
+  assert.equal(got, [
+    '* 정액권 안내드려요 *',
+    '',
+    '- 잔여 정액금 194,400원',
+    '- Gold 예약권 2,500,000원',
+    '(사용기한:~18개월 / 우선예약권:소진시까지)',
+    '- 1000ml 프로틴트리트먼트 & 750ml 두피트리트먼트 선물',
+    '',
+    '* 시술내역 (2026.09.22) *',
+    '매직C컬 230,000 원 사용하셔서',
+    '',
+    '남은 정액권은 2,464,400원입니다 : D',
+  ].join('\n'));
+  const multi = buildNotice({ ...TPL, prev: 300000, date: '2026-09-15', items: [{ name: '여성컷', amount: 30000 }, { name: '염색', amount: 80000 }], topup: null });
+  assert.equal(multi.split('\n')[4], '* 시술내역 (2026.09.15) *', '여러 건이어도 제목 한 곳에만');
+  const none = buildNotice({ ...TPL, prev: 300000, date: '', items: [{ name: '여성컷', amount: 30000 }], topup: null });
+  assert.equal(none.split('\n')[4], '* 시술내역 *', '날짜를 비우면 예전 그대로');
+});
+
+test('cleanDate — 안내문·방문 기록이 같은 규칙으로 날짜를 본다', () => {
+  const now = '2026-09-22T15:00:00';
+  assert.equal(cleanDate('2026-09-15', now), '2026-09-15');
+  assert.equal(cleanDate('', now), null, '비우면 null (그대로 둔다)');
+  assert.throws(() => cleanDate('2026-09-23', now), /뒤 날짜/);
+  assert.throws(() => cleanDate('2026-13-01', now), /날짜는/);
 });
 
 test('충전 없이 시술만 있으면 충전 줄이 빠진다', () => {
